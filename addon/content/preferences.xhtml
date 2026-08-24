@@ -1,0 +1,63 @@
+<html xmlns="http://www.w3.org/1999/xhtml" id="pdf-ocr-for-zotero-prefs">
+  <head>
+    <link rel="stylesheet" href="chrome://pdfocrforzotero/content/preferences.css"/>
+  </head>
+  <body id="pdf-ocr-prefs-body" class="pdf-ocr-prefs-body">
+    <h2>PDF OCR 设置</h2>
+
+    <section>
+      <h3>检测精度</h3>
+      <div class="pdf-ocr-row">
+        <label for="pdf-ocr-det-limit">检测分辨率</label>
+        <select id="pdf-ocr-det-limit">
+          <option value="512">512（快）</option>
+          <option value="768">768</option>
+          <option value="960">960</option>
+          <option value="1024">1024</option>
+          <option value="1280">1280</option>
+          <option value="1366">1366</option>
+          <option value="1536" selected="selected">1536（推荐）</option>
+        </select>
+      </div>
+      <p class="pdf-ocr-hint">数字越大越清晰，小字（如脚注、斜体）越容易识别，但 OCR 会变慢。</p>
+
+      <div class="pdf-ocr-row">
+        <label for="pdf-ocr-det-thresh">检测灵敏度</label>
+        <input type="number" id="pdf-ocr-det-thresh" min="0" max="1" step="0.05"/>
+      </div>
+      <p class="pdf-ocr-hint">数值越低越容易检出微弱、模糊的文字（也可能多出一些多余框）。默认 0.3。</p>
+
+      <div class="pdf-ocr-row">
+        <label for="pdf-ocr-det-box-thresh">文本框过滤</label>
+        <input type="number" id="pdf-ocr-det-box-thresh" min="0" max="1" step="0.05"/>
+      </div>
+      <p class="pdf-ocr-hint">数值越低保留越多检测框（包括得分低的），数值越高框越少但更干净。默认 0.4。</p>
+    </section>
+
+    <section>
+      <h3>完成后自动打开新附件</h3>
+      <div class="pdf-ocr-row">
+        <label>
+          <input type="checkbox" id="pdf-ocr-auto-open"/>
+          自动打开 [OCR] 附件
+        </label>
+      </div>
+      <p class="pdf-ocr-hint">OCR 完成后自动在阅读器中打开生成的 -ocr.pdf 附件。</p>
+    </section>
+
+    <section>
+      <div class="pdf-ocr-row">
+        <button id="pdf-ocr-reset-defaults">恢复默认设置</button>
+      </div>
+      <p class="pdf-ocr-hint">将上述所有选项恢复为默认值（1536 / 0.3 / 0.4 / 关闭自动打开）。</p>
+    </section>
+
+    <section>
+      <h3>版本信息</h3>
+      <div id="pdf-ocr-version-info" class="pdf-ocr-version-info">
+        <p>插件版本：<span id="pdf-ocr-plugin-version">—</span></p>
+        <p>OCR 引擎：RapidOCR（PP-OCRv4, onnxruntime-web WASM）</p>
+      </div>
+    </section>
+  </body>
+</html>

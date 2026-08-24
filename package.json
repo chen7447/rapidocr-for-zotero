@@ -1,0 +1,38 @@
+{
+  "name": "pdf-ocr-for-zotero",
+  "version": "1.6.0b6",
+  "description": "将图片型 PDF 转换为保留原页面且可搜索、可选择文字的 PDF。",
+  "type": "module",
+  "private": true,
+  "config": {
+    "addonName": "RapidOCR for Zotero",
+    "addonID": "pdfocrforzotero@example.com",
+    "addonRef": "pdfocrforzotero",
+    "addonInstance": "PDFOCRForZotero",
+    "prefsPrefix": "extensions.zotero.pdfocrforzotero"
+  },
+  "author": "chen7447",
+  "license": "MPL-2.0",
+  "scripts": {
+    "test": "node --import tsx --test tests/unit/*.test.cjs tests/unit/*.test.ts",
+    "typecheck": "tsc --noEmit",
+    "build": "node scripts/build.mjs && npm run typecheck",
+    "verify:xpi": "node scripts/verify-xpi.mjs"
+  },
+  "devDependencies": {
+    "@types/node": "^24.10.0",
+    "adm-zip": "^0.6.0",
+    "archiver": "^7.0.1",
+    "esbuild": "^0.25.12",
+    "onnxruntime-node": "^1.27.0",
+    "tsx": "^4.20.6",
+    "typescript": "^5.9.3",
+    "zotero-types": "^4.1.0-beta.4"
+  },
+  "dependencies": {
+    "@pdf-lib/fontkit": "^1.1.1",
+    "onnxruntime-web": "^1.27.0",
+    "pdf-lib": "^1.17.1",
+    "pdfjs-dist": "^6.2.108"
+  }
+}

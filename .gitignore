@@ -1,0 +1,31 @@
+# Local/private OCR fixtures and generated test artifacts
+/tests/fixtures/local-private/
+/tests/fixtures/generated/*.pdf
+/tests/fixtures/generated/*.png
+/tests/fixtures/generated/*.txt
+/tests/fixtures/generated/*.json
+
+# Local check artifacts
+/scripts/*.pdf
+/scripts/*.rgba
+/scripts/*.jpg
+/scripts/*.raw
+/scripts/python_*
+/scripts/_digit-cmap.pdf
+
+# Build and dependency output
+/node_modules/
+/.scaffold/
+/build/
+/dist/
+/coverage/
+*.tsbuildinfo
+/worker/.venv/
+/worker/.pytest_cache/
+/worker/**/__pycache__/
+
+# Secrets and local configuration
+.env
+.env.*
+!.env.example
+*.log

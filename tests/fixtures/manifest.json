@@ -1,0 +1,208 @@
+{
+  "schemaVersion": 1,
+  "policy": {
+    "publicFixturesRequireRedistributableLicense": true,
+    "privateFixturesMustNotBeCommitted": true,
+    "fidelityRenderComparison": "pixel-identical",
+    "textQualityThresholds": {
+      "clearEnglishCerMax": 0.05,
+      "clearSimplifiedChineseCerMax": 0.08,
+      "mixedChineseEnglishCerMax": 0.1,
+      "keywordRecallMin": 0.95
+    }
+  },
+  "fixtures": [
+    {
+      "id": "english-scan-clear",
+      "category": "english-scan",
+      "path": null,
+      "visibility": "public-or-generated",
+      "license": null,
+      "sha256": null,
+      "expected": { "ocr": true, "language": ["eng"] },
+      "riskTags": ["latin", "word-boxes"],
+      "status": "planned",
+      "missingReason": "Awaiting a generated or redistributable fixture and human ground truth."
+    },
+    {
+      "id": "simplified-chinese-scan-clear",
+      "category": "simplified-chinese-scan",
+      "path": null,
+      "visibility": "public-or-generated",
+      "license": null,
+      "sha256": null,
+      "expected": { "ocr": true, "language": ["chi_sim"] },
+      "riskTags": ["cjk", "character-width", "unicode"],
+      "status": "planned",
+      "missingReason": "Awaiting a generated or redistributable fixture and human ground truth."
+    },
+    {
+      "id": "mixed-chinese-english",
+      "category": "mixed-language",
+      "path": null,
+      "visibility": "local-private-or-generated",
+      "license": null,
+      "sha256": null,
+      "expected": { "ocr": true, "language": ["chi_sim", "eng"] },
+      "riskTags": ["cjk", "latin", "reading-order"],
+      "status": "planned",
+      "missingReason": "Requires a representative mixed-language fixture."
+    },
+    {
+      "id": "academic-two-column",
+      "category": "two-column",
+      "path": null,
+      "visibility": "local-private-or-public",
+      "license": null,
+      "sha256": null,
+      "expected": { "ocr": true },
+      "riskTags": ["reading-order", "cross-column-selection"],
+      "status": "planned",
+      "missingReason": "Requires a redistributable academic-style scan."
+    },
+    {
+      "id": "rotated-pages",
+      "category": "rotation",
+      "path": null,
+      "visibility": "generated",
+      "license": "CC0-1.0",
+      "sha256": null,
+      "expected": { "ocr": true, "rotations": [0, 90, 180, 270] },
+      "riskTags": ["rotate", "coordinate-transform"],
+      "status": "planned",
+      "missingReason": "Generator not implemented yet."
+    },
+    {
+      "id": "cropbox-mediabox-differ",
+      "category": "page-boxes",
+      "path": null,
+      "visibility": "generated",
+      "license": "CC0-1.0",
+      "sha256": null,
+      "expected": { "ocr": true, "cropBoxDiffers": true },
+      "riskTags": ["cropbox", "mediabox", "coordinate-origin"],
+      "status": "planned",
+      "missingReason": "Generator not implemented yet."
+    },
+    {
+      "id": "mixed-born-digital-and-scan",
+      "category": "mixed-page-types",
+      "path": null,
+      "visibility": "generated",
+      "license": "CC0-1.0",
+      "sha256": null,
+      "expected": { "ocr": true, "mode": "skip", "preserveDigitalText": true },
+      "riskTags": ["mode-skip", "born-digital"],
+      "status": "planned",
+      "missingReason": "Generator not implemented yet."
+    },
+    {
+      "id": "existing-good-ocr",
+      "category": "existing-ocr",
+      "path": null,
+      "visibility": "generated",
+      "license": "CC0-1.0",
+      "sha256": null,
+      "expected": { "ocr": false, "mode": "skip" },
+      "riskTags": ["duplicate-layer", "idempotency"],
+      "status": "planned",
+      "missingReason": "Generator not implemented yet."
+    },
+    {
+      "id": "existing-bad-ocr",
+      "category": "stale-ocr",
+      "path": null,
+      "visibility": "local-private-or-generated",
+      "license": null,
+      "sha256": null,
+      "expected": { "ocr": false, "mvpAction": "reject-or-skip" },
+      "riskTags": ["stale-layer", "redo-future"],
+      "status": "planned",
+      "missingReason": "Redo is outside MVP; fixture retained for future regression."
+    },
+    {
+      "id": "annotations-bookmarks-links",
+      "category": "interactive-objects",
+      "path": null,
+      "visibility": "generated",
+      "license": "CC0-1.0",
+      "sha256": null,
+      "expected": { "ocr": true, "preserveAnnotations": true, "preserveBookmarks": true, "preserveLinks": true },
+      "riskTags": ["annotation", "bookmark", "link"],
+      "status": "planned",
+      "missingReason": "Generator not implemented yet."
+    },
+    {
+      "id": "encrypted-pdf",
+      "category": "encrypted",
+      "path": null,
+      "visibility": "generated",
+      "license": "CC0-1.0",
+      "sha256": null,
+      "expected": { "ocr": false, "errorCode": "ENCRYPTED_PDF" },
+      "riskTags": ["security", "reject"],
+      "status": "planned",
+      "missingReason": "Generator not implemented yet."
+    },
+    {
+      "id": "digitally-signed-pdf",
+      "category": "digital-signature",
+      "path": null,
+      "visibility": "generated-or-public",
+      "license": null,
+      "sha256": null,
+      "expected": { "ocr": false, "errorCode": "SIGNED_PDF" },
+      "riskTags": ["signature", "reject"],
+      "status": "planned",
+      "missingReason": "Requires a reproducible signed fixture or redistributable sample."
+    },
+    {
+      "id": "form-or-tagged-pdf",
+      "category": "structured-pdf",
+      "path": null,
+      "visibility": "generated",
+      "license": "CC0-1.0",
+      "sha256": null,
+      "expected": { "ocr": false, "preserveStructure": true },
+      "riskTags": ["acroform", "tagged-pdf", "struct-tree"],
+      "status": "planned",
+      "missingReason": "Generator not implemented yet."
+    },
+    {
+      "id": "truncated-invalid-pdf",
+      "category": "invalid-pdf",
+      "path": null,
+      "visibility": "generated",
+      "license": "CC0-1.0",
+      "sha256": null,
+      "expected": { "ocr": false, "errorCode": "INVALID_PDF" },
+      "riskTags": ["corruption", "reject"],
+      "status": "planned",
+      "missingReason": "Generator not implemented yet."
+    },
+    {
+      "id": "large-page-long-document",
+      "category": "scale",
+      "path": null,
+      "visibility": "generated-or-local-private",
+      "license": null,
+      "sha256": null,
+      "expected": { "ocr": true },
+      "riskTags": ["memory", "timeout", "large-dimensions", "many-pages"],
+      "status": "planned",
+      "missingReason": "Requires bounded generated fixtures and a separate soak corpus."
+    },
+    {
+      "id": "windows-path-unicode-long",
+      "category": "windows-path",
+      "path": null,
+      "visibility": "generated",
+      "license": "CC0-1.0",
+      "sha256": null,
+      "expected": { "ocr": true },
+      "riskTags": ["unicode-path", "spaces", "long-path"],
+      "status": "planned",
+      "missingReason": "Fixture is created dynamically under a Chinese long path during tests."
+    }
+  ]
+}

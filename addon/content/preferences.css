@@ -1,0 +1,56 @@
+.pdf-ocr-prefs-body {
+  color-scheme: light dark;
+  font-family: system-ui, sans-serif;
+  padding: 8px 16px;
+  max-width: 560px;
+}
+
+.pdf-ocr-prefs-body h2 {
+  margin: 0 0 12px;
+  font-size: 1.2rem;
+}
+
+.pdf-ocr-prefs-body section {
+  margin-bottom: 18px;
+}
+
+.pdf-ocr-prefs-body h3 {
+  margin: 0 0 6px;
+  font-size: 1rem;
+  font-weight: 600;
+}
+
+.pdf-ocr-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 4px 0;
+}
+
+.pdf-ocr-row label {
+  min-width: 130px;
+}
+
+.pdf-ocr-row input[type="number"] {
+  width: 80px;
+  padding: 3px 6px;
+  font-family: monospace;
+}
+
+.pdf-ocr-hint {
+  margin: 4px 0 0;
+  font-size: 0.85rem;
+  opacity: 0.7;
+}
+
+.pdf-ocr-doctor-results {
+  margin-top: 8px;
+  font-family: monospace;
+  font-size: 0.85rem;
+  white-space: pre-wrap;
+}
+
+.pdf-ocr-version-info p {
+  margin: 2px 0;
+  font-size: 0.9rem;
+}

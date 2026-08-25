@@ -6,6 +6,7 @@ import {
 
 export const CONTEXT_MENU_ID = "pdf-ocr-for-zotero-create-searchable-pdf";
 export const PLUGIN_ID = "pdfocrforzotero@example.com";
+export const CONTEXT_MENU_ICON = "chrome://pdfocrforzotero/content/icons/pdf-ocr.svg";
 
 export interface MenuManagerLike {
   registerMenu(options: {
@@ -50,6 +51,7 @@ export class ContextMenuController {
       menus: [
         {
           menuType: "menuitem",
+          icon: CONTEXT_MENU_ICON,
           // Zotero 10's MenuManager only supports l10nID (no label field).
           // Use onShowing to set the label directly on the XUL element.
           onShowing: (_event, context) => {

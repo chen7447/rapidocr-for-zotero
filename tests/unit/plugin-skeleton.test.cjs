@@ -70,11 +70,11 @@ function createBootstrapSandbox() {
   return { sandbox, calls, chromeHandle };
 }
 
-test("manifest targets Zotero 9.0–10.0.x and remains a Beta", () => {
+test("manifest targets Zotero 9.0–10.0.x", () => {
   const manifest = JSON.parse(read("addon/manifest.json"));
   assert.equal(manifest.manifest_version, 2);
-  assert.equal(manifest.name, "PDF OCR For Zotero v3");
-  assert.match(manifest.version, /^\d+(?:\.\d+){0,3}b\d+$/i);
+  assert.equal(manifest.name, "RapidOCR for Zotero");
+  assert.match(manifest.version, /^\d+(?:\.\d+){0,3}(?:b\d+)?$/i);
   assert.equal(manifest.applications.zotero.strict_min_version, "9.0");
   assert.equal(manifest.applications.zotero.strict_max_version, "10.0.*");
   assert.equal(manifest.applications.zotero.id, "pdfocrforzotero@example.com");

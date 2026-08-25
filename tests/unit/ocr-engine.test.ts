@@ -21,3 +21,8 @@ test("OcrEngine.cancel() makes a subsequent run() throw immediately", async () =
   engine.cancel();
   await assert.rejects(() => engine.run(), /OCR cancelled/);
 });
+
+test("OcrEngine.run with empty pageIndexes throws before rendering", async () => {
+  const engine = new OcrEngine(fakeRenderer(), { pageIndexes: [] });
+  await assert.rejects(() => engine.run(), /No pages to OCR/);
+});

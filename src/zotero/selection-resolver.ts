@@ -33,7 +33,7 @@ export type SelectionPreview = {
 
 export type ItemsByID = (ids: number[]) => SelectionItem[];
 
-function isDerivedOCRAttachment(item: SelectionItem): boolean {
+export function isDerivedOCRAttachment(item: SelectionItem): boolean {
   const title = item.getDisplayTitle?.() || "";
   return /(?:\s|^)\[OCR\](?:\s|$)/i.test(title);
 }

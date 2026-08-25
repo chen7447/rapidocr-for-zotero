@@ -8,12 +8,23 @@ export type JobStatus =
 export type Job = {
   jobId: string;
   attachmentID: number;
+  /** File to render for OCR. */
   path: string;
   title: string;
   status: JobStatus;
   error?: { code: string; message: string; retryable: boolean };
   percent: number;
   stage: string;
+  /** 0-based; omit = all pages. */
+  pageIndexes?: number[];
+  /** Write onto this file instead of creating a sibling [OCR] attachment. */
+  inPlace?: boolean;
+  /** Overlay onto this file (existing [OCR] copy). Defaults to `path`. */
+  writePath?: string;
+  writeAttachmentID?: number;
+  detLimitSideLen?: number;
+  detThresh?: number;
+  detBoxThresh?: number;
 };
 
 const VALID_TRANSITIONS: Record<JobStatus, JobStatus[]> = {

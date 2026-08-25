@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { CONTEXT_MENU_ID, MenuManagerLike, ContextMenuController } from "../../src/ui/context-menu";
+import { CONTEXT_MENU_ID, CONTEXT_MENU_ICON, MenuManagerLike, ContextMenuController } from "../../src/ui/context-menu";
 import { SelectionItem, SelectionResolver } from "../../src/zotero/selection-resolver";
 
 class FakeItem implements SelectionItem {
@@ -72,6 +72,12 @@ test("register includes a main-window localization resource and direct l10n id",
   const registration = menuManager.registered[0];
   assert.equal(registration.menus[0].l10nID, "pdf-ocr-menu-create");
   assert.equal(registration.menus[0].l10nArgs, undefined);
+});
+
+test("register uses the 16x16 context-fill menu icon", () => {
+  const { controller, menuManager } = makeController([]);
+  controller.register();
+  assert.equal(menuManager.registered[0].menus[0].icon, CONTEXT_MENU_ICON);
 });
 
 test("command prefers context.items when Zotero supplies them", async () => {

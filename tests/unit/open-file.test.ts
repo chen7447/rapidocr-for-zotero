@@ -8,10 +8,10 @@ test("openAttachment uses FileHandlers.open with the attachment item", async () 
   const opened: unknown[] = [];
   (globalThis as { Zotero: unknown }).Zotero = {
     Items: { get: (id: number) => (id === 42 ? item : undefined) },
-    FileHandlers: { open: async (it: unknown) => { opened.push(it); } },
+    FileHandlers: { open: async (it: unknown, params?: unknown) => { opened.push(it, params); } },
   };
-  await openAttachment(42);
-  assert.deepEqual(opened, [item]);
+  await openAttachment(42, 2);
+  assert.deepEqual(opened, [item, { location: { pageIndex: 2 } }]);
 });
 
 test("openAttachment falls back to Reader.open", async () => {

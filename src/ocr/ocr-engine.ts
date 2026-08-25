@@ -28,6 +28,8 @@ export type OcrOptions = {
   isCancelled?: () => boolean;
   /** progress callback */
   onProgress?: OcrProgressSink;
+  /** 0-based page indexes; omit = all pages */
+  pageIndexes?: number[];
 };
 
 export class OcrEngine {
@@ -45,10 +47,12 @@ export class OcrEngine {
     return this.aborted || !!this.options.isCancelled?.();
   }
 
-  /** Run OCR on every page of `renderer`. Returns the page results. */
+  /** Run OCR on selected pages of `renderer` (all pages if `pageIndexes` omitted). */
   async run(): Promise<OCRResult> {
-    const { detThresh = 0.3, detBoxThresh = 0.4, detLimitSideLen = 1536, onProgress } = this.options;
+    const { detThresh = 0.3, detBoxThresh = 0.4, detLimitSideLen = 1536, onProgress, pageIndexes } = this.options;
     const pageCount = this.renderer.pageCount;
+    const indexes = resolvePageIndexes(pageCount, pageIndexes);
+    if (!indexes.length) throw new Error("No pages to OCR");
     const pages: OCRPageResult[] = [];
     if (this.cancelled()) throw new Error("OCR cancelled");
 
@@ -70,11 +74,12 @@ export class OcrEngine {
       });
 
       // 2. Per-page loop: render on main thread (fast), infer in worker.
-      for (let pageIndex = 0; pageIndex < pageCount; pageIndex++) {
+      for (let i = 0; i < indexes.length; i++) {
+        const pageIndex = indexes[i];
         if (this.cancelled()) throw new Error("OCR cancelled");
-        const pagePct = (pageIndex / pageCount) * 100;
+        const pagePct = (i / indexes.length) * 100;
 
-        onProgress?.({ stage: "render", percent: pagePct, message: `OCR 第 ${pageIndex + 1}/${pageCount} 页…` });
+        onProgress?.({ stage: "render", percent: pagePct, message: `OCR 第 ${pageIndex + 1} 页（${i + 1}/${indexes.length}）…` });
 
         const img = await this.renderer.renderPage(pageIndex);
         if (this.cancelled()) throw new Error("OCR cancelled");
@@ -94,7 +99,7 @@ export class OcrEngine {
 
         onProgress?.({
           stage: "done-page",
-          percent: ((pageIndex + 1) / pageCount) * 100,
+          percent: ((i + 1) / indexes.length) * 100,
           message: `第 ${pageIndex + 1} 页完成 (${boxes.length} 个文本框)`,
         });
       }
@@ -120,4 +125,18 @@ export class OcrEngine {
       this.client = null;
     }
   }
+}
+
+/** Unique sorted 0-based indexes in range. Empty `pageIndexes` = all pages. */
+export function resolvePageIndexes(pageCount: number, pageIndexes?: number[]): number[] {
+  if (!pageIndexes) return Array.from({ length: pageCount }, (_, i) => i);
+  const seen = new Set<number>();
+  const out: number[] = [];
+  for (const i of pageIndexes) {
+    if (!Number.isInteger(i) || i < 0 || i >= pageCount || seen.has(i)) continue;
+    seen.add(i);
+    out.push(i);
+  }
+  out.sort((a, b) => a - b);
+  return out;
 }

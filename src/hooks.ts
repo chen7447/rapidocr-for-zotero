@@ -7,8 +7,11 @@ import {
   SelectionItem,
   SelectionResolution,
   SelectionResolver,
+  isDerivedOCRAttachment,
 } from "./zotero/selection-resolver";
 import { Job } from "./domain/job";
+import { registerReaderToolbar, unregisterReaderToolbar, PageOcrRequest, StripRequest } from "./ui/reader-toolbar";
+import { toPageIndexes } from "./ocr/page-spec";
 
 const initializedWindows = new WeakSet<Window>();
 let contextMenuController: ContextMenuController | null = null;
@@ -46,7 +49,7 @@ function getFallbackSelection(): SelectionItem[] {
   return (pane?.getSelectedItems?.() || []) as SelectionItem[];
 }
 
-function createJob(jobIndex: number, item: SelectionItem, path: string): Job {
+function createJob(jobIndex: number, item: SelectionItem, path: string, extra: Partial<Job> = {}): Job {
   return {
     jobId: `job-${Date.now()}-${jobIndex}`,
     attachmentID: item.id,
@@ -55,7 +58,42 @@ function createJob(jobIndex: number, item: SelectionItem, path: string): Job {
     status: "queued",
     percent: 0,
     stage: "queued",
+    ...extra,
   };
+}
+
+function readOcrPrefs(): { detLimitSideLen: number; detThresh: number; detBoxThresh: number; autoOpen: boolean } {
+  const PREFIX = "pdfocrforzotero";
+  const detLimitSideLen = Number(Zotero.Prefs.get(PREFIX + ".detLimitSideLen")) || 1536;
+  const detThreshRaw = Number(Zotero.Prefs.get(PREFIX + ".detThresh")) || 0;
+  const detThreshPct = detThreshRaw >= 1 ? detThreshRaw : (detThreshRaw > 0 && detThreshRaw < 1 ? Math.round(detThreshRaw * 100) : 30);
+  const detBoxThreshRaw = Number(Zotero.Prefs.get(PREFIX + ".detBoxThresh")) || 0;
+  const detBoxThreshPct = detBoxThreshRaw >= 1 ? detBoxThreshRaw : (detBoxThreshRaw > 0 && detBoxThreshRaw < 1 ? Math.round(detBoxThreshRaw * 100) : 40);
+  return {
+    detLimitSideLen,
+    detThresh: detThreshPct / 100,
+    detBoxThresh: detBoxThreshPct / 100,
+    autoOpen: !!Zotero.Prefs.get(PREFIX + ".autoOpenAfterSuccess"),
+  };
+}
+
+function siblingAttachments(item: SelectionItem): SelectionItem[] {
+  const parentID = item.parentItemID;
+  if (!parentID) return [];
+  const parent = zoteroItemsByID([parentID])[0];
+  const ids = parent?.getAttachments?.() || [];
+  return zoteroItemsByID(ids).filter((a) => a.id !== item.id);
+}
+
+function findOcrSibling(item: SelectionItem): SelectionItem | undefined {
+  return siblingAttachments(item).find(isDerivedOCRAttachment);
+}
+
+function findSourceSibling(item: SelectionItem): SelectionItem | undefined {
+  return siblingAttachments(item).find((a) => !isDerivedOCRAttachment(a) && (
+    a.attachmentContentType === "application/pdf"
+    || /\.pdf$/i.test(a.getFilePath?.() || "")
+  ));
 }
 
 function confirmCreateParent(title: string): boolean {
@@ -79,6 +117,17 @@ function ensureJobManager(): JobManager {
         ocrDialog.setOnCancel(() => jobManager?.cancelCurrent());
 
         try {
+          if (job.inPlace) {
+            const closeIDs = [job.attachmentID];
+            if (job.writeAttachmentID && job.writeAttachmentID !== job.attachmentID) {
+              closeIDs.push(job.writeAttachmentID);
+            }
+            ocrDialog.updateProgress(0, "v3", "关闭阅读器…");
+            for (const id of closeIDs) closeReadersFor(id);
+            for (const id of closeIDs) await waitReadersClosed(id);
+            await sleep(200);
+          }
+
           // 1. Load PDF via Zotero's built-in pdf.js (解析约几十毫秒)
           ocrDialog.updateProgress(0, "v3", "解析 PDF…");
           const { ZoteroPageRenderer } = await import("./ocr/zotero-renderer");
@@ -86,33 +135,19 @@ function ensureJobManager(): JobManager {
           await renderer.load(job.path);
           if (ocrDialog.isCancelled) throw new Error("OCR cancelled");
 
-          // 2. Read v3 OCR preferences (defaults match prefs.js)
-          // 短前缀：Zotero.Prefs 自动加 "extensions.zotero." 前缀，
-          // 与 prefs.js 的 pref("extensions.zotero.pdfocrforzotero.*") 完整 key 一致。
-          // 注意：Firefox pref 无 float 类型，阈值以 0~100 整数百分比存储，
-          // 读取后 ÷100 得到 0~1 小数。兼容旧值（旧版被截断成 0 或残留小数）。
-          const PREFIX = "pdfocrforzotero";
+          const prefs = readOcrPrefs();
+          const detLimitSideLen = job.detLimitSideLen ?? prefs.detLimitSideLen;
+          const detThresh = job.detThresh ?? prefs.detThresh;
+          const detBoxThresh = job.detBoxThresh ?? prefs.detBoxThresh;
+          const autoOpen = prefs.autoOpen;
 
-          const detLimitSideLen = Number(Zotero.Prefs.get(PREFIX + ".detLimitSideLen")) || 1536;
-
-          const detThreshRaw = Number(Zotero.Prefs.get(PREFIX + ".detThresh")) || 0;
-          // 旧值：0（截断）或 0.x（小数）→ 归一化到整数百分比 30, 40
-          const detThreshPct = detThreshRaw >= 1 ? detThreshRaw : (detThreshRaw > 0 && detThreshRaw < 1 ? Math.round(detThreshRaw * 100) : 30);
-          const detThresh = detThreshPct / 100;
-
-          const detBoxThreshRaw = Number(Zotero.Prefs.get(PREFIX + ".detBoxThresh")) || 0;
-          const detBoxThreshPct = detBoxThreshRaw >= 1 ? detBoxThreshRaw : (detBoxThreshRaw > 0 && detBoxThreshRaw < 1 ? Math.round(detBoxThreshRaw * 100) : 40);
-          const detBoxThresh = detBoxThreshPct / 100;
-
-          const autoOpen = !!Zotero.Prefs.get(PREFIX + ".autoOpenAfterSuccess");
-
-          // 3. Run OCR engine — 模型加载 + Worker 推理都在引擎内部，不阻塞 UI
           ocrDialog.updateProgress(0, "v3", "OCR 处理中…");
           const { OcrEngine } = await import("./ocr/ocr-engine");
           const engine = new OcrEngine(renderer, {
             detLimitSideLen,
             detThresh,
             detBoxThresh,
+            pageIndexes: job.pageIndexes,
             isCancelled: () => ocrDialog?.isCancelled ?? false,
             onProgress: ({ percent, message }) => ocrDialog?.updateProgress(Math.round(percent), "v3", message),
           });
@@ -133,10 +168,20 @@ function ensureJobManager(): JobManager {
           // IOUtils.read 返回的是 Gecko 主 realm 的 Uint8Array；pdf-lib 用
           // `instanceof Uint8Array`（沙箱 realm）做类型检查会失败（报 "NaN"），
           // 必须 `new Uint8Array(...)` 拷贝成沙箱 realm 的 TypedArray。
-          const originalBytes = new Uint8Array(await IOUtils.read(job.path));
+          const overlayPath = job.writePath || job.path;
+          const originalBytes = new Uint8Array(await IOUtils.read(overlayPath));
           const outputPdf = await addOcrLayerToPdf(originalBytes, result);
 
-          // 4. Write output PDF and create [OCR] attachment
+          if (job.inPlace) {
+            await writePdf(overlayPath, outputPdf);
+            const indexedID = job.writeAttachmentID ?? job.attachmentID;
+            await Zotero.Fulltext.indexItems([indexedID], { complete: true, ignoreErrors: false });
+            ocrDialog.complete(`OCR 完成 — ${result.pages.reduce((s, p) => s + p.boxes.length, 0)} 个文本框`);
+            try { await reopenAttachment(indexedID, job.pageIndexes?.[0]); }
+            catch (openErr) { log(`reopen after page OCR: ${openErr instanceof Error ? openErr.message : String(openErr)}`); }
+            return;
+          }
+
           const { createOCRAttachment, createParentAndAttachOCR } = await import("./zotero/attachment-service");
           const outputPath = job.path.replace(/\.pdf$/i, "-ocr.pdf");
           await IOUtils.write(outputPath, outputPdf);
@@ -248,6 +293,170 @@ async function handleSelection(resolution: SelectionResolution): Promise<void> {
   });
 }
 
+async function handlePageOcr(req: PageOcrRequest): Promise<void> {
+  const item = zoteroItemsByID([req.itemID])[0];
+  if (!item) {
+    log(`page OCR: item ${req.itemID} not found`);
+    return;
+  }
+  const path = await item.getFilePathAsync?.() || item.getFilePath?.() || false;
+  if (!path) {
+    log(`page OCR: file unavailable for ${req.itemID}`);
+    return;
+  }
+  const extra: Partial<Job> = {
+    pageIndexes: toPageIndexes(req.pages1),
+    detLimitSideLen: req.detLimitSideLen,
+    detThresh: req.detThresh,
+    detBoxThresh: req.detBoxThresh,
+  };
+  let renderItem = item;
+  let renderPath = path;
+  if (isDerivedOCRAttachment(item)) {
+    extra.inPlace = true;
+    extra.writePath = path;
+    extra.writeAttachmentID = item.id;
+    const source = findSourceSibling(item);
+    const srcPath = source
+      ? await source.getFilePathAsync?.() || source.getFilePath?.() || false
+      : false;
+    if (source && srcPath) {
+      renderItem = source;
+      renderPath = srcPath;
+    }
+  } else {
+    const sibling = findOcrSibling(item);
+    const sibPath = sibling
+      ? await sibling.getFilePathAsync?.() || sibling.getFilePath?.() || false
+      : false;
+    if (sibling && sibPath) {
+      extra.inPlace = true;
+      extra.writePath = sibPath;
+      extra.writeAttachmentID = sibling.id;
+    }
+  }
+  try {
+    ensureJobManager().enqueue(createJob(0, renderItem, renderPath, extra));
+  } catch (err) {
+    log(`page OCR enqueue failed: ${err instanceof Error ? err.message : String(err)}`);
+  }
+}
+
+async function itemPath(item: SelectionItem): Promise<string | false> {
+  return await item.getFilePathAsync?.() || item.getFilePath?.() || false;
+}
+
+function readerList(): Array<{ itemID?: number; close?: () => void; navigate?: (loc: { pageIndex: number }) => Promise<void> }> {
+  return (Zotero as unknown as { Reader?: { _readers?: Array<{ itemID?: number; close?: () => void; navigate?: (loc: { pageIndex: number }) => Promise<void> }> } }).Reader?._readers || [];
+}
+
+function closeReadersFor(itemID: number): void {
+  const tabs = (Zotero.getMainWindow() as unknown as { Zotero_Tabs?: { getTabIDByItemID?: (id: number) => string; close: (id: string) => void } }).Zotero_Tabs;
+  const tabID = tabs?.getTabIDByItemID?.(itemID);
+  if (tabID) tabs?.close(tabID);
+  for (const r of readerList()) {
+    if (r.itemID === itemID) r.close?.();
+  }
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function waitReadersClosed(itemID: number): Promise<void> {
+  for (let i = 0; i < 25; i++) {
+    if (!readerList().some((r) => r.itemID === itemID)) return;
+    await sleep(100);
+  }
+}
+
+async function writePdf(path: string, bytes: Uint8Array): Promise<void> {
+  let last: unknown;
+  for (let i = 0; i < 8; i++) {
+    try {
+      await IOUtils.write(path, bytes);
+      return;
+    } catch (err) {
+      last = err;
+      await sleep(150 * (i + 1));
+    }
+  }
+  throw last instanceof Error ? last : new Error(String(last));
+}
+
+async function reopenAttachment(itemID: number, pageIndex?: number): Promise<void> {
+  const { openAttachment } = await import("./zotero/open-file");
+  await openAttachment(itemID, pageIndex);
+}
+
+async function handleStripOcr(req: StripRequest): Promise<void> {
+  log(`strip OCR: item ${req.itemID} pages ${req.pages1.join(",")}`);
+  const item = zoteroItemsByID([req.itemID])[0];
+  if (!item) {
+    OcrProgressDialog.notify("删除 OCR 文字层", "找不到当前附件。");
+    return;
+  }
+  const ocrItem = isDerivedOCRAttachment(item) ? item : (findOcrSibling(item) || item);
+  const ocrPath = await itemPath(ocrItem);
+  if (!ocrPath) {
+    OcrProgressDialog.notify("删除 OCR 文字层", "当前附件文件不可用。");
+    return;
+  }
+  const sourceItem = isDerivedOCRAttachment(ocrItem)
+    ? (isDerivedOCRAttachment(item) ? findSourceSibling(item) : item)
+    : undefined;
+  const sourcePath = sourceItem && sourceItem.id !== ocrItem.id ? await itemPath(sourceItem) : false;
+  const pageIndexes = toPageIndexes(req.pages1);
+
+  closeReadersFor(req.itemID);
+  if (ocrItem.id !== req.itemID) closeReadersFor(ocrItem.id);
+
+  if (ocrDialog) { ocrDialog.close(); ocrDialog = null; }
+  ocrDialog = new OcrProgressDialog();
+  ocrDialog.open(ocrItem.getDisplayTitle?.() || "", "删除 OCR 文字层");
+  ocrDialog.updateProgress(5, "v3", "关闭阅读器…");
+
+  try {
+    await waitReadersClosed(req.itemID);
+    if (ocrItem.id !== req.itemID) await waitReadersClosed(ocrItem.id);
+    await sleep(200);
+
+    ocrDialog.updateProgress(20, "v3", "读取 PDF…");
+    const { stripAllOcrOverlays, restorePagesFromSource } = await import("./ocr/pdf-builder");
+    const ocrBytes = new Uint8Array(await IOUtils.read(ocrPath));
+    let bytes: Uint8Array;
+    let n = 0;
+    if (sourcePath) {
+      ocrDialog.updateProgress(45, "v3", "从原件恢复页面…");
+      const restored = await restorePagesFromSource(ocrBytes, new Uint8Array(await IOUtils.read(sourcePath)), pageIndexes);
+      bytes = restored.bytes;
+      n = restored.pagesRestored;
+    } else {
+      ocrDialog.updateProgress(45, "v3", "删除文字层…");
+      const stripped = await stripAllOcrOverlays(ocrBytes, pageIndexes);
+      bytes = stripped.bytes;
+      n = stripped.pagesStripped;
+    }
+    if (!n) {
+      ocrDialog.fail("指定页没有可删除的 OCR 文字层。");
+      await reopenAttachment(ocrItem.id, pageIndexes[0]);
+      return;
+    }
+    ocrDialog.updateProgress(80, "v3", "写入 PDF…");
+    await writePdf(ocrPath, bytes);
+    ocrDialog.updateProgress(90, "v3", "重建全文索引…");
+    await Zotero.Fulltext.indexItems([ocrItem.id], { complete: true, ignoreErrors: false });
+    ocrDialog.complete(`已从第 ${req.pages1.join("、")} 页去掉文字层。`);
+    try { await reopenAttachment(ocrItem.id, pageIndexes[0]); }
+    catch (err) { log(`reopen after strip: ${err instanceof Error ? err.message : String(err)}`); }
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    log(`strip OCR failed: ${msg}`);
+    ocrDialog?.fail(msg);
+    try { await reopenAttachment(ocrItem.id, pageIndexes[0]); } catch {}
+  }
+}
+
 async function onStartup(): Promise<void> {
   for (const window of Zotero.getMainWindows()) {
     await onMainWindowLoad(window);
@@ -265,6 +474,15 @@ async function onStartup(): Promise<void> {
     );
     contextMenuController.register();
   }
+  unregisterReaderToolbar();
+  registerReaderToolbar((req) => {
+    void handlePageOcr(req).catch((err) => log(`page OCR: ${err instanceof Error ? err.message : String(err)}`));
+  }, () => {
+    const p = readOcrPrefs();
+    return { detLimitSideLen: p.detLimitSideLen, detThresh: p.detThresh, detBoxThresh: p.detBoxThresh };
+  }, (req) => {
+    void handleStripOcr(req).catch((err) => log(`strip OCR: ${err instanceof Error ? err.message : String(err)}`));
+  });
   log("startup complete");
 }
 
@@ -289,6 +507,7 @@ async function onShutdown(): Promise<void> {
   if (ocrDialog) { ocrDialog.close(); ocrDialog = null; }
   contextMenuController?.unregister();
   contextMenuController = null;
+  unregisterReaderToolbar();
   for (const window of Zotero.getMainWindows()) {
     await onMainWindowUnload(window);
   }

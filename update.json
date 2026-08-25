@@ -1,0 +1,18 @@
+{
+  "addons": {
+    "pdfocrforzotero@example.com": {
+      "updates": [
+        {
+          "version": "1.7.0",
+          "update_link": "https://github.com/chen7447/rapidocr-for-zotero/releases/download/v1.7.0/pdf-ocr-for-zotero-1.7.0.xpi",
+          "applications": {
+            "zotero": {
+              "strict_min_version": "9.0",
+              "strict_max_version": "10.0.*"
+            }
+          }
+        }
+      ]
+    }
+  }
+}

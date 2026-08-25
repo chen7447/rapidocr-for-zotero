@@ -55,7 +55,7 @@ const DIALOG_HTML = `<!DOCTYPE html>
 </style>
 </head>
 <body>
-  <h1>Create Searchable PDF</h1>
+  <h1 id="dialog-title">Create Searchable PDF</h1>
   <div id="file-name"></div>
   <progress id="progress-bar" value="0" max="100"></progress>
   <div id="progress-text">0%</div>
@@ -76,7 +76,7 @@ export class OcrProgressDialog {
   // ── lifecycle ───────────────────────────────────────────────────────
 
   /** Open the dialog window and populate it with the embedded HTML. */
-  open(fileName: string): void {
+  open(fileName: string, headline?: string): void {
     const win = (Services as unknown as {
       ww: {
         openWindow(
@@ -102,7 +102,8 @@ export class OcrProgressDialog {
     win.document.write(DIALOG_HTML);
     win.document.close();
 
-    // Set the file name
+    const titleEl = win.document.getElementById("dialog-title");
+    if (titleEl && headline) titleEl.textContent = headline;
     const nameEl = win.document.getElementById("file-name");
     if (nameEl) nameEl.textContent = fileName;
 

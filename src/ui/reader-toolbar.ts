@@ -146,8 +146,8 @@ function togglePop(doc: Document, reader: ReaderLike, btn: HTMLElement): void {
     </label>
     <label style="display:block;margin-bottom:6px">检测分辨率
       <select id="pdfocr-limit" style="width:100%;margin-top:2px">
-        ${[512, 768, 960, 1024, 1280, 1366, 1536].map((n) =>
-          `<option value="${n}"${n === p.detLimitSideLen ? " selected" : ""}>${n}${n === 1536 ? "（推荐）" : ""}</option>`,
+        ${[512, 768, 960, 1024, 1280, 1366, 1536, 1920].map((n) =>
+          `<option value="${n}"${n === p.detLimitSideLen ? " selected" : ""}>${n}${n === 1536 ? "（推荐）" : ""}${n === 1920 ? "（大版面/扫描件）" : ""}</option>`,
         ).join("")}
       </select>
     </label>

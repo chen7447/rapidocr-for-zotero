@@ -58,12 +58,20 @@ function onRenderToolbar(event: {
   btn.className = "toolbar-button";
   btn.title = "OCR 当前页";
   btn.setAttribute("aria-label", "OCR 当前页");
-  const img = doc.createElement("img");
-  img.src = "chrome://pdfocrforzotero/content/icons/pdf-ocr.svg";
-  img.width = 16;
-  img.height = 16;
-  img.alt = "";
-  btn.append(img);
+  // 图标用 data URI 内联 SVG + currentColor：pdf.js iframe 沙箱内
+  // chrome:// 与 context-fill 均无法解析，data URI 最可靠且跟随主题色。
+  // 复用插件同一份 pdf-ocr.svg 的路径，仅把 context-fill 换成 currentColor。
+  const ICON_DATA_URI =
+    "data:image/svg+xml;utf8," +
+    encodeURIComponent(`<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16">
+  <path fill="currentColor" d="M2.5 1A1.5 1.5 0 0 0 1 2.5v9A1.5 1.5 0 0 0 2.5 13h4.1A4.5 4.5 0 0 1 7 11.5H2.5a.5.5 0 0 1-.5-.5v-9a.5.5 0 0 1 .5-.5H7v3h3.5V7c.52 0 1.02.07 1.5.2V4.5L8.5 1H2.5zm6 .8L10.7 4H8.5V1.8zM4 6.5h4.5V8H4V6.5zM4 9h3v1.5H4V9z"/>
+  <path fill="currentColor" fill-rule="evenodd" d="M11.5 8a3.5 3.5 0 1 0 2.12 6.28l1.55 1.55a.75.75 0 1 0 1.06-1.06l-1.55-1.55A3.5 3.5 0 0 0 11.5 8zM9.5 11.5a2 2 0 1 1 4 0 2 2 0 0 1-4 0z"/>
+</svg>`);
+  btn.style.backgroundImage = `url('${ICON_DATA_URI}')`;
+  btn.style.backgroundSize = "16px 16px";
+  btn.style.backgroundPosition = "center";
+  btn.style.backgroundRepeat = "no-repeat";
+  btn.style.color = "currentColor";
   btn.addEventListener("click", (ev) => {
     ev.preventDefault();
     ev.stopPropagation();

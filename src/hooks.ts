@@ -49,6 +49,21 @@ function getFallbackSelection(): SelectionItem[] {
   return (pane?.getSelectedItems?.() || []) as SelectionItem[];
 }
 
+/**
+ * 兜底：手动触发 MenuManager 重建「主条目」右键菜单。
+ * 缓解 Zotero 已知 bug——注销插件菜单后主条目右键菜单打不开。
+ * 加载时执行可修复被其它插件搞坏的菜单；注销后执行是尽力而为的缓解。
+ */
+function rebuildLibraryItemMenu(): void {
+  try {
+    const mm = (Zotero as unknown as {
+      MenuManager?: { updateMenuPopup?: (popup: unknown, target: string) => void };
+    }).MenuManager;
+    const popup = Zotero.getMainWindow()?.document?.getElementById("zotero-itemmenu");
+    if (mm?.updateMenuPopup && popup) mm.updateMenuPopup(popup, "main/library/item");
+  } catch { /* best-effort */ }
+}
+
 function createJob(jobIndex: number, item: SelectionItem, path: string, extra: Partial<Job> = {}): Job {
   return {
     jobId: `job-${Date.now()}-${jobIndex}`,
@@ -62,17 +77,25 @@ function createJob(jobIndex: number, item: SelectionItem, path: string, extra: P
   };
 }
 
-function readOcrPrefs(): { detLimitSideLen: number; detThresh: number; detBoxThresh: number; autoOpen: boolean } {
+function readOcrPrefs(): { detLimitSideLen: number; detThresh: number; detBoxThresh: number; detMaxRotDeg: number; cropMode: number; ocrWorkers: number; autoOpen: boolean } {
   const PREFIX = "pdfocrforzotero";
   const detLimitSideLen = Number(Zotero.Prefs.get(PREFIX + ".detLimitSideLen")) || 1536;
   const detThreshRaw = Number(Zotero.Prefs.get(PREFIX + ".detThresh")) || 0;
   const detThreshPct = detThreshRaw >= 1 ? detThreshRaw : (detThreshRaw > 0 && detThreshRaw < 1 ? Math.round(detThreshRaw * 100) : 30);
   const detBoxThreshRaw = Number(Zotero.Prefs.get(PREFIX + ".detBoxThresh")) || 0;
   const detBoxThreshPct = detBoxThreshRaw >= 1 ? detBoxThreshRaw : (detBoxThreshRaw > 0 && detBoxThreshRaw < 1 ? Math.round(detBoxThreshRaw * 100) : 40);
+  const detMaxRotDeg = Number(Zotero.Prefs.get(PREFIX + ".detMaxRotDeg")) || 30;
+  const cropModeRaw = Number(Zotero.Prefs.get(PREFIX + ".cropMode"));
+  const cropMode = cropModeRaw === 0 || cropModeRaw === 1 ? cropModeRaw : 2;
+  const ocrWorkersRaw = Number(Zotero.Prefs.get(PREFIX + ".ocrWorkers"));
+  const ocrWorkers = Number.isInteger(ocrWorkersRaw) && ocrWorkersRaw >= 1 ? ocrWorkersRaw : 4;
   return {
     detLimitSideLen,
     detThresh: detThreshPct / 100,
     detBoxThresh: detBoxThreshPct / 100,
+    detMaxRotDeg,
+    cropMode,
+    ocrWorkers,
     autoOpen: !!Zotero.Prefs.get(PREFIX + ".autoOpenAfterSuccess"),
   };
 }
@@ -139,6 +162,9 @@ function ensureJobManager(): JobManager {
           const detLimitSideLen = job.detLimitSideLen ?? prefs.detLimitSideLen;
           const detThresh = job.detThresh ?? prefs.detThresh;
           const detBoxThresh = job.detBoxThresh ?? prefs.detBoxThresh;
+          const detMaxRotDeg = job.detMaxRotDeg ?? prefs.detMaxRotDeg;
+          const cropMode = job.cropMode ?? prefs.cropMode;
+          const ocrWorkers = job.ocrWorkers ?? prefs.ocrWorkers;
           const autoOpen = prefs.autoOpen;
 
           ocrDialog.updateProgress(0, "v3", "OCR 处理中…");
@@ -147,9 +173,12 @@ function ensureJobManager(): JobManager {
             detLimitSideLen,
             detThresh,
             detBoxThresh,
+            maxRotDeg: detMaxRotDeg,
+            cropMode,
+            workers: ocrWorkers,
             pageIndexes: job.pageIndexes,
             isCancelled: () => ocrDialog?.isCancelled ?? false,
-            onProgress: ({ percent, message }) => ocrDialog?.updateProgress(Math.round(percent), "v3", message),
+            onProgress: (info) => ocrDialog?.updateProgress(Math.round(info.percent), info.stage, info.message),
           });
           activeEngine = engine;
           let result;
@@ -287,9 +316,32 @@ async function handleSelection(resolution: SelectionResolution): Promise<void> {
     Zotero.debug(`PDF OCR For Zotero: ${message}`);
     return;
   }
+
+  // 右键 OCR PDF：先弹设置面板（预填偏好，仅本次生效），点「运行」才入队；
+  // 「取消」或关闭面板则不执行本次操作。
+  const { showOcrSettingsDialog } = await import("./ui/ocr-settings-dialog");
+  const p = readOcrPrefs();
+  const settings = await showOcrSettingsDialog(
+    {
+      detLimitSideLen: p.detLimitSideLen,
+      detThresh: p.detThresh,
+      detBoxThresh: p.detBoxThresh,
+      detMaxRotDeg: p.detMaxRotDeg,
+      cropMode: p.cropMode,
+      ocrWorkers: p.ocrWorkers,
+    },
+    count === 1
+      ? (resolution.jobs[0].attachment.getDisplayTitle?.() || "OCR PDF 设置")
+      : `将对 ${count} 个 PDF 应用以下设置（仅本次生效）`,
+  );
+  if (!settings) {
+    log("OCR PDF cancelled by user (settings dialog)");
+    return;
+  }
+
   const manager = ensureJobManager();
   resolution.jobs.forEach((job, index) => {
-    manager.enqueue(createJob(index, job.attachment, job.path));
+    manager.enqueue(createJob(index, job.attachment, job.path, settings));
   });
 }
 
@@ -309,6 +361,9 @@ async function handlePageOcr(req: PageOcrRequest): Promise<void> {
     detLimitSideLen: req.detLimitSideLen,
     detThresh: req.detThresh,
     detBoxThresh: req.detBoxThresh,
+    detMaxRotDeg: req.detMaxRotDeg,
+    cropMode: req.cropMode,
+    ocrWorkers: req.ocrWorkers,
   };
   let renderItem = item;
   let renderPath = path;
@@ -472,14 +527,21 @@ async function onStartup(): Promise<void> {
       handleSelection,
       getFallbackSelection,
     );
-    contextMenuController.register();
+    try {
+      contextMenuController.register();
+    } catch {
+      // MenuManager 不可用时不崩溃，降级为无右键菜单
+      contextMenuController = null;
+    }
+    // 兜底：加载时强制重建主条目右键菜单（修复被其它插件禁用搞坏的菜单）
+    rebuildLibraryItemMenu();
   }
   unregisterReaderToolbar();
   registerReaderToolbar((req) => {
     void handlePageOcr(req).catch((err) => log(`page OCR: ${err instanceof Error ? err.message : String(err)}`));
   }, () => {
     const p = readOcrPrefs();
-    return { detLimitSideLen: p.detLimitSideLen, detThresh: p.detThresh, detBoxThresh: p.detBoxThresh };
+    return { detLimitSideLen: p.detLimitSideLen, detThresh: p.detThresh, detBoxThresh: p.detBoxThresh, detMaxRotDeg: p.detMaxRotDeg, cropMode: p.cropMode, ocrWorkers: p.ocrWorkers };
   }, (req) => {
     void handleStripOcr(req).catch((err) => log(`strip OCR: ${err instanceof Error ? err.message : String(err)}`));
   });
@@ -505,8 +567,12 @@ async function onShutdown(): Promise<void> {
   jobManager?.shutdown();
   jobManager = null;
   if (ocrDialog) { ocrDialog.close(); ocrDialog = null; }
-  contextMenuController?.unregister();
-  contextMenuController = null;
+  if (contextMenuController) {
+    try { contextMenuController.unregister(); } catch { /* best-effort */ }
+    contextMenuController = null;
+    // 兜底：注销后强制重建菜单（实测压不住 shutdown 之后的破坏，尽力而为）
+    rebuildLibraryItemMenu();
+  }
   unregisterReaderToolbar();
   for (const window of Zotero.getMainWindows()) {
     await onMainWindowUnload(window);

@@ -63,7 +63,17 @@ function compBBox(
   return { x: minX, y: minY, w: maxX - minX + 1, h: maxY - minY + 1 };
 }
 
-/** Mean score of the probability map within the bounding box. */
+/** Mean probability over the component's own pixels (the text region).
+ *  PaddleOCR's box_score_fast fills the contour as a mask — an AABB mean
+ *  would dilute with the empty corner triangles of a rotated box and drop
+ *  valid tilted text below the box threshold. */
+function compScore(probMap: Float32Array, comp: number[]): number {
+  let sum = 0;
+  for (const p of comp) sum += probMap[p];
+  return comp.length > 0 ? sum / comp.length : 0;
+}
+
+/** Mean probability over the AABB (1.7.2 behavior — used by cropMode 0). */
 function boxScore(
   probMap: Float32Array,
   mapW: number,
@@ -79,10 +89,154 @@ function boxScore(
   return count > 0 ? sum / count : 0;
 }
 
+// ─── geometry: convex hull + minAreaRect + convex polygon offset ─────
+// Pure-JS replacements for OpenCV (minAreaRect) and pyclipper (unclip),
+// so rotated text boxes get a proper rotated quad instead of an AABB.
+
+type Pt = [number, number];
+
+function cross(o: Pt, a: Pt, b: Pt): number {
+  return (a[0] - o[0]) * (b[1] - o[1]) - (a[1] - o[1]) * (b[0] - o[0]);
+}
+
+/** Andrew monotone chain → convex hull, counter-clockwise. */
+function convexHull(pts: Pt[]): Pt[] {
+  if (pts.length <= 3) return pts.slice();
+  const p = pts.slice().sort((a, b) => a[0] - b[0] || a[1] - b[1]);
+  const lower: Pt[] = [];
+  for (const q of p) {
+    while (lower.length >= 2 && cross(lower[lower.length - 2], lower[lower.length - 1], q) <= 0) lower.pop();
+    lower.push(q);
+  }
+  const upper: Pt[] = [];
+  for (let i = p.length - 1; i >= 0; i--) {
+    const q = p[i];
+    while (upper.length >= 2 && cross(upper[upper.length - 2], upper[upper.length - 1], q) <= 0) upper.pop();
+    upper.push(q);
+  }
+  lower.pop(); upper.pop();
+  return lower.concat(upper);
+}
+
+function polygonArea(pts: Pt[]): number {
+  let a = 0;
+  for (let i = 0; i < pts.length; i++) {
+    const [x1, y1] = pts[i], [x2, y2] = pts[(i + 1) % pts.length];
+    a += x1 * y2 - x2 * y1;
+  }
+  return a / 2;
+}
+
+function polygonPerimeter(pts: Pt[]): number {
+  let p = 0;
+  for (let i = 0; i < pts.length; i++) {
+    const [x1, y1] = pts[i], [x2, y2] = pts[(i + 1) % pts.length];
+    p += Math.hypot(x2 - x1, y2 - y1);
+  }
+  return p;
+}
+
+/**
+ * Minimum-area enclosing rectangle (rotating calipers over hull edges).
+ * O(n²) on the hull — text blobs are small, fine for hundreds of boxes.
+ * Returns the 4 corners (cyclic) and the rect area.
+ */
+function minAreaRect(pts: Pt[]): { corners: Pt[]; area: number } {
+  const hull = convexHull(pts);
+  const n = hull.length;
+  if (n < 3) return { corners: hull, area: 0 };
+  let bestArea = Infinity, best: Pt[] = [];
+  for (let i = 0; i < n; i++) {
+    const a = hull[i], b = hull[(i + 1) % n];
+    let dx = b[0] - a[0], dy = b[1] - a[1];
+    const len = Math.hypot(dx, dy) || 1; dx /= len; dy /= len;
+    const nx = -dy, ny = dx; // unit normal
+    let minD = 0, maxD = 0, minN = 0, maxN = 0;
+    for (const p of hull) {
+      const d = (p[0] - a[0]) * dx + (p[1] - a[1]) * dy;
+      const nn = (p[0] - a[0]) * nx + (p[1] - a[1]) * ny;
+      if (d < minD) minD = d; if (d > maxD) maxD = d;
+      if (nn < minN) minN = nn; if (nn > maxN) maxN = nn;
+    }
+    const area = (maxD - minD) * (maxN - minN);
+    if (area < bestArea) {
+      bestArea = area;
+      best = [
+        [a[0] + minD * dx + minN * nx, a[1] + minD * dy + minN * ny],
+        [a[0] + maxD * dx + minN * nx, a[1] + maxD * dy + minN * ny],
+        [a[0] + maxD * dx + maxN * nx, a[1] + maxD * dy + maxN * ny],
+        [a[0] + minD * dx + maxN * nx, a[1] + minD * dy + maxN * ny],
+      ];
+    }
+  }
+  return { corners: best, area: bestArea };
+}
+
+/**
+ * Order minAreaRect corners as [TL, TR, BR, BL] for the rec crop.
+ * The TEXT READING DIRECTION is the quad's LONG AXIS — make it the top edge
+ * (TL→TR), with TL = the long-axis endpoint with the smaller x (the left end).
+ * This deskews BOTH slope directions correctly: the old "topmost corner"
+ * heuristic put the SHORT edge on top for negative-slope lines, feeding the
+ * recognizer a 90°-rotated crop (→ missed text).
+ *
+ * `corners` must be cyclic ([c0,c1,c2,c3], as minAreaRect returns). The long
+ * axis is the LONGER ADJACENT SIDE (edge01 or edge12) — never the diagonal,
+ * which is the farthest point-pair but not the text direction.
+ */
+function orderRectCorners(corners: Pt[]): Pt[] {
+  const e01 = Math.hypot(corners[1][0] - corners[0][0], corners[1][1] - corners[0][1]);
+  const e12 = Math.hypot(corners[2][0] - corners[1][0], corners[2][1] - corners[1][1]);
+  let TL: Pt, TR: Pt, BL: Pt, BR: Pt;
+  if (e01 >= e12) {
+    // long side = c0–c1; short neighbors: c3 (of c0) and c2 (of c1)
+    [TL, TR, BL, BR] = corners[0][0] <= corners[1][0]
+      ? [corners[0], corners[1], corners[3], corners[2]]
+      : [corners[1], corners[0], corners[2], corners[3]];
+  } else {
+    // long side = c1–c2; short neighbors: c0 (of c1) and c3 (of c2)
+    [TL, TR, BL, BR] = corners[1][0] <= corners[2][0]
+      ? [corners[1], corners[2], corners[0], corners[3]]
+      : [corners[2], corners[1], corners[3], corners[0]];
+  }
+  return [TL, TR, BR, BL];
+}
+
+/**
+ * Outward offset of a convex polygon by `dist` (official DB unclip, pyclipper
+ * equivalent). Each edge is translated outward along its normal, then adjacent
+ * offset edges are intersected to rebuild the vertex. Exact for convex quads —
+ * no pyclipper dependency needed.
+ */
+function offsetPolygon(hull: Pt[], dist: number): Pt[] {
+  const n = hull.length;
+  const sign = polygonArea(hull) >= 0 ? 1 : -1; // CCW → outward is the right-hand normal
+  const offStart: Pt[] = [], dir: Pt[] = [];
+  for (let i = 0; i < n; i++) {
+    const a = hull[i], b = hull[(i + 1) % n];
+    const dx = b[0] - a[0], dy = b[1] - a[1];
+    const len = Math.hypot(dx, dy) || 1;
+    const nx = dy * sign / len, ny = -dx * sign / len;
+    offStart.push([a[0] + dist * nx, a[1] + dist * ny]);
+    dir.push([dx, dy]);
+  }
+  const out: Pt[] = [];
+  for (let i = 0; i < n; i++) {
+    const p1 = offStart[(i - 1 + n) % n], d1 = dir[(i - 1 + n) % n];
+    const p2 = offStart[i], d2 = dir[i];
+    const den = d1[0] * d2[1] - d1[1] * d2[0];
+    if (Math.abs(den) < 1e-9) { out.push([(p1[0] + p2[0]) / 2, (p1[1] + p2[1]) / 2]); continue; }
+    const t1 = ((p2[0] - p1[0]) * d2[1] - (p2[1] - p1[1]) * d2[0]) / den;
+    out.push([p1[0] + t1 * d1[0], p1[1] + t1 * d1[1]]);
+  }
+  return out;
+}
+
 // ─── det postprocess (simplified DB) ─────────────────────────────────
 
 export interface DetBox {
-  /** 4 corner points in original image coordinates: [x1,y1, x2,y2, x3,y3, x4,y4] */
+  /** 4 corner points in original image coords, ordered [TL, TR, BR, BL].
+   *  minAreaRect quad — may be rotated (not an AABB), for the rec crop. */
   points: number[];
   /**
    * Un-clipped (raw) bounding box in original image coordinates — the
@@ -132,9 +286,17 @@ export function detPostprocess(
     boxThresh?: number;
     minSize?: number;
     useDilation?: boolean;
+    /** Drop boxes whose long axis is tilted more than this many degrees from
+     *  horizontal (diagonal watermarks / rotated stamps). PP-OCRv4 rec only
+     *  reads horizontal text; these aren't content anyway — keep the layer clean. */
+    maxRotDeg?: number;
+    /** 0=直立正文（1.7.2：AABB 框 + AABB 得分，无旋转过滤，worker 直接拷贝）
+     *  1=倾斜正文（minAreaRect + 旋转矫正裁剪）
+     *  2=复合方法（默认：近轴对齐走直接拷贝，真倾斜才拉正） */
+    cropMode?: number;
   } = {},
 ): DetPostprocessResult {
-  const { thresh = 0.3, boxThresh = 0.5, minSize = 3, useDilation = true } = options;
+  const { thresh = 0.3, boxThresh = 0.5, minSize = 3, useDilation = true, maxRotDeg = 30, cropMode = 2 } = options;
 
   // 1. Threshold
   const binary = new Uint8Array(mapW * mapH);
@@ -166,55 +328,83 @@ export function detPostprocess(
   // 3. Connected components
   const components = connectedComponents(binary, mapW, mapH);
 
-  // 4. Convert to boxes, unclip, filter, scale
+  // 4. Convert to boxes, unclip (convex polygon offset), scale
   const boxes: DetBox[] = [];
   const invScaleX = 1 / scaleX;
   const invScaleY = 1 / scaleY;
   const unclipRatio = 1.6;  // matching RapidOCR config
+  const clampTo = (v: number, lo: number, hi: number) => Math.min(Math.max(v, lo), hi);
 
   for (const comp of components) {
     const bbox = compBBox(comp, mapW);
     if (bbox.w < minSize || bbox.h < minSize) continue;
 
-    // Score is computed on the ORIGINAL box (pre-unclip) — matches Python
-    const score = boxScore(probMap, mapW, bbox);
+    if (cropMode === 0) {
+      // 1.7.2 直立正文：AABB 框 + AABB 得分 + 无旋转过滤（原版行为）
+      const score = boxScore(probMap, mapW, bbox);
+      if (score < boxThresh) continue;
+      const dist = (bbox.w * bbox.h * unclipRatio) / (2 * (bbox.w + bbox.h));
+      const x1 = Math.round(clampTo((bbox.x - dist) * invScaleX, 0, origW - 1));
+      const y1 = Math.round(clampTo((bbox.y - dist) * invScaleY, 0, origH - 1));
+      const x2 = Math.round(clampTo((bbox.x + bbox.w + dist) * invScaleX, 0, origW - 1));
+      const y2 = Math.round(clampTo((bbox.y + bbox.h + dist) * invScaleY, 0, origH - 1));
+      const r1 = Math.round(clampTo(bbox.x * invScaleX, 0, origW - 1));
+      const rt1 = Math.round(clampTo(bbox.y * invScaleY, 0, origH - 1));
+      const r2 = Math.round(clampTo((bbox.x + bbox.w) * invScaleX, 0, origW - 1));
+      const rt2 = Math.round(clampTo((bbox.y + bbox.h) * invScaleY, 0, origH - 1));
+      boxes.push({
+        points: [x1, y1, x2, y1, x2, y2, x1, y2], // AABB, TL,TR,BR,BL
+        raw: { x1: r1, y1: rt1, x2: r2, y2: rt2 },
+        score,
+      });
+      continue;
+    }
+
+    // mode 1/2 — score over the component region (pre-unclip) — matches PaddleOCR
+    const score = compScore(probMap, comp);
     if (score < boxThresh) continue;
 
-    // Unclip: expand the box by distance = area * unclipRatio / perimeter
-    // This approximates pyclipper's polygon offset in the Python code.
-    const area = bbox.w * bbox.h;
-    const peri = 2 * (bbox.w + bbox.h);
-    const dist = peri > 0 ? (area * unclipRatio) / peri : 0;
+    // Component pixels → convex hull → minAreaRect quad (official: contour →
+    // unclip → minAreaRect). dist = area * unclipRatio / perimeter (PaddleOCR).
+    const pts: Pt[] = [];
+    for (const p of comp) pts.push([p % mapW, (p / mapW) | 0]);
+    const hull = convexHull(pts);
+    const area = Math.abs(polygonArea(hull));
+    const peri = polygonPerimeter(hull);
+    if (area <= 0 || peri <= 0) continue;
+    const dist = (area * unclipRatio) / peri;
+    const quad = orderRectCorners(minAreaRect(offsetPolygon(hull, dist)).corners);
 
-    // Expanded box (clamped to map bounds)
-    const ux1 = Math.max(0, Math.floor(bbox.x - dist));
-    const uy1 = Math.max(0, Math.floor(bbox.y - dist));
-    const ux2 = Math.min(mapW - 1, Math.ceil(bbox.x + bbox.w + dist));
-    const uy2 = Math.min(mapH - 1, Math.ceil(bbox.y + bbox.h + dist));
+    // Drop steeply-rotated boxes (diagonal watermarks/stamps). With the new
+    // ordering, TL→TR is the long axis (text direction), so the angle is
+    // well-defined. Guard with aspect ratio: near-square boxes (single chars,
+    // math symbols) have a meaningless "long axis" angle and are NOT watermarks
+    // — only filter clearly-elongated boxes (real lines/watermarks).
+    if (maxRotDeg < 90) {
+      const longLen = Math.hypot(quad[1][0] - quad[0][0], quad[1][1] - quad[0][1]);
+      const shortLen = Math.hypot(quad[3][0] - quad[0][0], quad[3][1] - quad[0][1]);
+      if (longLen > 0 && longLen / shortLen >= 1.5) {
+        const deg = Math.abs(Math.atan2(quad[1][1] - quad[0][1], quad[1][0] - quad[0][0])) * 180 / Math.PI;
+        if (Math.min(deg, 180 - deg) > maxRotDeg) continue;
+      }
+    }
 
-    // Scale back to original coordinates (X and Y independently — roundTo32
-    // makes the resize ratios differ between axes, PaddleOCR ratio_w/ratio_h)
-    const x1 = Math.round(ux1 * invScaleX);
-    const y1 = Math.round(uy1 * invScaleY);
-    const x2 = Math.round(ux2 * invScaleX);
-    const y2 = Math.round(uy2 * invScaleY);
+    // Scale back to original coords (X/Y independently — roundTo32 skews
+    // ratios; PaddleOCR ratio_w/ratio_h), clamp to image bounds.
+    const scaled = quad.map(([x, y]) => [
+      Math.round(clampTo(x * invScaleX, 0, origW - 1)),
+      Math.round(clampTo(y * invScaleY, 0, origH - 1)),
+    ]);
 
-    // Clamp to original image bounds
-    const cx1 = Math.max(0, Math.min(x1, origW - 1));
-    const cy1 = Math.max(0, Math.min(y1, origH - 1));
-    const cx2 = Math.max(0, Math.min(x2, origW - 1));
-    const cy2 = Math.max(0, Math.min(y2, origH - 1));
+    // Raw (pre-unclip) AABB, scaled back — the true text region for the
+    // invisible text layer (unclipped quad is too padded for exact overlay).
+    const r1 = Math.round(clampTo(bbox.x * invScaleX, 0, origW - 1));
+    const rt1 = Math.round(clampTo(bbox.y * invScaleY, 0, origH - 1));
+    const r2 = Math.round(clampTo((bbox.x + bbox.w) * invScaleX, 0, origW - 1));
+    const rt2 = Math.round(clampTo((bbox.y + bbox.h) * invScaleY, 0, origH - 1));
 
-    // Raw (pre-unclip) bounding box, also scaled back to original coords —
-    // this is the true text region for the invisible text layer.
-    const r1 = Math.max(0, Math.min(Math.round(bbox.x * invScaleX), origW - 1));
-    const rt1 = Math.max(0, Math.min(Math.round(bbox.y * invScaleY), origH - 1));
-    const r2 = Math.max(0, Math.min(Math.round((bbox.x + bbox.w) * invScaleX), origW - 1));
-    const rt2 = Math.max(0, Math.min(Math.round((bbox.y + bbox.h) * invScaleY), origH - 1));
-
-    // 4 corner points: top-left, top-right, bottom-right, bottom-left
     boxes.push({
-      points: [cx1, cy1, cx2, cy1, cx2, cy2, cx1, cy2],
+      points: [scaled[0][0], scaled[0][1], scaled[1][0], scaled[1][1], scaled[2][0], scaled[2][1], scaled[3][0], scaled[3][1]],
       raw: { x1: r1, y1: rt1, x2: r2, y2: rt2 },
       score,
     });

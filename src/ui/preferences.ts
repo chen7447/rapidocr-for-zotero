@@ -23,6 +23,7 @@ export const DEFAULT_PREFS: PrefDefinition[] = [
   // Firefox pref 无 float 类型，阈值以 0~100 整数百分比存储（30 = 0.3）
   { key: "detThresh", default: 30 },
   { key: "detBoxThresh", default: 40 },
+  { key: "ocrWorkers", default: 4 },
   { key: "autoOpenAfterSuccess", default: false },
 ];
 

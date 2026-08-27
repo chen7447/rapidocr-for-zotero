@@ -33,6 +33,28 @@
         <input type="number" id="pdf-ocr-det-box-thresh" min="0" max="1" step="0.05"/>
       </div>
       <p class="pdf-ocr-hint">数值越低保留越多检测框（包括得分低的），数值越高框越少但更干净。默认 0.4。</p>
+
+      <div class="pdf-ocr-row">
+        <label for="pdf-ocr-det-max-rot">倾斜文字过滤</label>
+        <input type="number" id="pdf-ocr-det-max-rot" min="0" max="90" step="5"/>
+      </div>
+      <p class="pdf-ocr-hint">长轴与水平夹角超过此角度的文本框（斜水印/旋转文字/印章）将被忽略、不写入文本层。0=只保留水平，90=不过滤。默认 30。</p>
+
+      <div class="pdf-ocr-row">
+        <label for="pdf-ocr-crop-mode">识别模式</label>
+        <select id="pdf-ocr-crop-mode">
+          <option value="0">直立正文（AABB 直接裁剪）</option>
+          <option value="1">倾斜正文（旋转矫正）</option>
+          <option value="2" selected="selected">复合方法（推荐）</option>
+        </select>
+      </div>
+      <p class="pdf-ocr-hint">直立正文 = 锋利直接裁剪，适合无倾斜页面；倾斜正文 = 恒旋转矫正，适合倾斜扫描页；复合方法 = 近轴对齐走直接裁剪、真倾斜才拉正（兼顾两者）。</p>
+
+      <div class="pdf-ocr-row">
+        <label for="pdf-ocr-workers">并行核心数</label>
+        <input type="number" id="pdf-ocr-workers" min="1" max="8" step="1"/>
+      </div>
+      <p class="pdf-ocr-hint">开多少个并行 OCR worker（每个占一个核心，多页时并行加速）。核心越多越快但更吃内存和整机资源，小文档建议 4。默认 4。</p>
     </section>
 
     <section>
@@ -50,7 +72,7 @@
       <div class="pdf-ocr-row">
         <button id="pdf-ocr-reset-defaults">恢复默认设置</button>
       </div>
-      <p class="pdf-ocr-hint">将上述所有选项恢复为默认值（1536 / 0.3 / 0.4 / 关闭自动打开）。</p>
+      <p class="pdf-ocr-hint">将上述所有选项恢复为默认值（1536 / 0.3 / 0.4 / 30 / 复合方法 / 并行核心数 4 / 关闭自动打开）。</p>
     </section>
 
     <section>

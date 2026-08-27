@@ -6,7 +6,9 @@
 
 /** A single detected text region with its recognized content. */
 export interface OCRBox {
-  /** 4 corner points [x1,y1, x2,y1, x2,y2, x1,y2] in page pixel coords. */
+  /** 4 corner points [x1,y1, x2,y2, x3,y3, x4,y4] ordered [TL, TR, BR, BL] —
+   *  minAreaRect quad in page pixel coords, may be rotated (drives the
+   *  rotation-corrected rec crop). */
   points: number[];
   /**
    * Raw (pre-unclip) bounding box in page pixel coords — the true text

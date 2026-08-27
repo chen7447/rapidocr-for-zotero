@@ -198,11 +198,14 @@ export function recPreprocess(
   return { tensor: chw, scale: resizedW / width, width: resizedW, height: imgH };
 }
 
-// ─── crop RGBA region from image ────────────────────────────────────
+// ─── direct (AABB) crop — 1.7.2 sharp pixel copy ────────────────────
 
 /**
- * Extract a rectangular region from an RGBA pixel buffer.
- * @returns A new Uint8ClampedArray containing the cropped RGBA pixels.
+ * Extract a rectangular region from an RGBA pixel buffer WITHOUT interpolation
+ * (direct pixel copy). For near-upright text this is sharper than cropQuad's
+ * bilinear sampling, which slightly blurs every pixel (marginal small/thin
+ * glyphs can tip into rec garbage). cropMode 0 and the axis-aligned branch of
+ * hybrid mode use this.
  */
 export function cropRGBA(
   src: Uint8ClampedArray,
@@ -224,6 +227,54 @@ export function cropRGBA(
       out[di + 1] = src[si + 1];
       out[di + 2] = src[si + 2];
       out[di + 3] = 255;
+    }
+  }
+  return out;
+}
+
+// ─── rectified crop from a (possibly rotated) quad ───────────────────
+
+/**
+ * Sample a rectified (rotation-corrected) RGBA crop for a text quad ordered
+ * [TL, TR, BR, BL]. Bilinear inverse mapping, out-of-bounds clamped to edge
+ * pixels. Mirrors the OpenCV perspective warp PaddleOCR applies before rec —
+ * without it, a rotated box's AABB crop feeds neighboring rows/noise into the
+ * recognizer.
+ *
+ * @param src    RGBA source page image.
+ * @param quad   8 numbers: [TLx,TLy, TRx,TRy, BRx,BRy, BLx,BLy].
+ */
+export function cropQuad(
+  src: Uint8ClampedArray,
+  srcW: number,
+  srcH: number,
+  quad: number[],
+  outW: number,
+  outH: number,
+): Uint8ClampedArray {
+  const out = new Uint8ClampedArray(outW * outH * 4);
+  const [tlx, tly, trx, try2, brx, bry, blx, bly] = quad;
+  for (let v = 0; v < outH; v++) {
+    const s = outH > 1 ? v / (outH - 1) : 0;
+    for (let u = 0; u < outW; u++) {
+      const t = outW > 1 ? u / (outW - 1) : 0;
+      // top edge TL→TR, bottom edge BL→BR, then down the vertical
+      const tx = tlx + (trx - tlx) * t, ty = tly + (try2 - tly) * t;
+      const bx = blx + (brx - blx) * t, by = bly + (bry - bly) * t;
+      const sx = tx + (bx - tx) * s, sy = ty + (by - ty) * s;
+      const x = Math.min(Math.max(sx, 0), srcW - 1), y = Math.min(Math.max(sy, 0), srcH - 1);
+      const x0 = Math.floor(x), y0 = Math.floor(y);
+      const x1 = Math.min(x0 + 1, srcW - 1), y1 = Math.min(y0 + 1, srcH - 1);
+      const fx = x - x0, fy = y - y0;
+      const i00 = (y0 * srcW + x0) * 4, i10 = (y0 * srcW + x1) * 4;
+      const i01 = (y1 * srcW + x0) * 4, i11 = (y1 * srcW + x1) * 4;
+      const o = (v * outW + u) * 4;
+      for (let c = 0; c < 3; c++) {
+        const top = src[i00 + c] + (src[i10 + c] - src[i00 + c]) * fx;
+        const bot = src[i01 + c] + (src[i11 + c] - src[i01 + c]) * fx;
+        out[o + c] = top + (bot - top) * fy;
+      }
+      out[o + 3] = 255;
     }
   }
   return out;

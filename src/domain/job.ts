@@ -25,6 +25,12 @@ export type Job = {
   detLimitSideLen?: number;
   detThresh?: number;
   detBoxThresh?: number;
+  /** 长轴与水平夹角超过该角度的框（斜水印）丢弃；undefined = 用偏好值 */
+  detMaxRotDeg?: number;
+  /** 0=直立正文 1=倾斜正文 2=复合方法（可覆盖偏好默认） */
+  cropMode?: number;
+  /** 并行 worker 数（可覆盖偏好默认；undefined = 用偏好值） */
+  ocrWorkers?: number;
 };
 
 const VALID_TRANSITIONS: Record<JobStatus, JobStatus[]> = {

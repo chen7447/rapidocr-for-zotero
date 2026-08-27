@@ -26,6 +26,12 @@ export class WorkerClient {
     number,
     { resolve: (boxes: OCRBox[]) => void; reject: (err: Error) => void }
   >();
+  /** 单页并行流程（det/recBatch）用自增 id 做请求-响应匹配。 */
+  private seq = 0;
+  private pendingSeq = new Map<
+    number,
+    { resolve: (boxes: OCRBox[]) => void; reject: (err: Error) => void }
+  >();
   private errorCb: ((message: string) => void) | null = null;
   private initResolve: (() => void) | null = null;
   private initReject: ((err: Error) => void) | null = null;
@@ -52,7 +58,7 @@ export class WorkerClient {
   /** Hand model assets to the worker and wait for ready. */
   async init(
     assets: OCRModelAssets,
-    detOptions: { detLimitSideLen: number; detThresh: number; detBoxThresh: number },
+    detOptions: { detLimitSideLen: number; detThresh: number; detBoxThresh: number; maxRotDeg: number; cropMode: number },
   ): Promise<void> {
     if (this.dead) throw new Error("OCR cancelled");
     const ready = new Promise<void>((resolve, reject) => {
@@ -69,6 +75,8 @@ export class WorkerClient {
         detLimitSideLen: detOptions.detLimitSideLen,
         detThresh: detOptions.detThresh,
         detBoxThresh: detOptions.detBoxThresh,
+        maxRotDeg: detOptions.maxRotDeg,
+        cropMode: detOptions.cropMode,
       },
       [assets.wasm, assets.det, assets.rec],
     );
@@ -84,6 +92,26 @@ export class WorkerClient {
         { type: "page", pageIndex, width, height, rgba },
         [rgba], // transferable — zero-copy
       );
+    });
+  }
+
+  /** Single-page phase 1: det the whole page, return raw boxes (text empty). */
+  detPage(width: number, height: number, rgba: ArrayBuffer): Promise<OCRBox[]> {
+    if (this.dead) return Promise.reject(new Error("OCR cancelled"));
+    const id = ++this.seq;
+    return new Promise<OCRBox[]>((resolve, reject) => {
+      this.pendingSeq.set(id, { resolve, reject });
+      this.worker.postMessage({ type: "det", id, width, height, rgba }, [rgba]);
+    });
+  }
+
+  /** Single-page phase 2: rec the given boxes, return them with text. */
+  recBatch(width: number, height: number, rgba: ArrayBuffer, boxes: OCRBox[]): Promise<OCRBox[]> {
+    if (this.dead) return Promise.reject(new Error("OCR cancelled"));
+    const id = ++this.seq;
+    return new Promise<OCRBox[]>((resolve, reject) => {
+      this.pendingSeq.set(id, { resolve, reject });
+      this.worker.postMessage({ type: "recBatch", id, width, height, rgba, boxes }, [rgba]);
     });
   }
 
@@ -114,6 +142,10 @@ export class WorkerClient {
       reject(new Error(message));
     }
     this.pending.clear();
+    for (const { reject } of this.pendingSeq.values()) {
+      reject(new Error(message));
+    }
+    this.pendingSeq.clear();
   }
 
   private onMessage(data: unknown): void {
@@ -130,6 +162,15 @@ export class WorkerClient {
       const entry = this.pending.get(pi);
       if (entry) {
         this.pending.delete(pi);
+        entry.resolve(msg.boxes as OCRBox[]);
+      }
+      return;
+    }
+    if (msg.type === "detResult" || msg.type === "recResult") {
+      const id = msg.id as number;
+      const entry = this.pendingSeq.get(id);
+      if (entry) {
+        this.pendingSeq.delete(id);
         entry.resolve(msg.boxes as OCRBox[]);
       }
       return;

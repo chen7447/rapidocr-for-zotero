@@ -1,6 +1,6 @@
 {
   "name": "pdf-ocr-for-zotero",
-  "version": "1.7.2",
+  "version": "1.9.1",
   "description": "将图片型 PDF 转换为保留原页面且可搜索、可选择文字的 PDF。",
   "type": "module",
   "private": true,

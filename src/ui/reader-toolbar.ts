@@ -7,6 +7,9 @@ export type PageOcrRequest = {
   detLimitSideLen: number;
   detThresh: number;
   detBoxThresh: number;
+  detMaxRotDeg: number;
+  cropMode: number;
+  ocrWorkers: number;
 };
 
 export type StripRequest = {
@@ -18,6 +21,9 @@ export type OcrPrefValues = {
   detLimitSideLen: number;
   detThresh: number;
   detBoxThresh: number;
+  detMaxRotDeg: number;
+  cropMode: number;
+  ocrWorkers: number;
 };
 
 type ReaderLike = {
@@ -38,7 +44,7 @@ const STRIP_TIP = "删除 OCR 文字层（该按钮测试使用，不影响 OCR 
 
 let onSubmit: ((req: PageOcrRequest) => void) | null = null;
 let onStrip: ((req: StripRequest) => void) | null = null;
-let prefs: () => OcrPrefValues = () => ({ detLimitSideLen: 1536, detThresh: 0.3, detBoxThresh: 0.4 });
+let prefs: () => OcrPrefValues = () => ({ detLimitSideLen: 1536, detThresh: 0.3, detBoxThresh: 0.4, detMaxRotDeg: 30, cropMode: 2, ocrWorkers: 4 });
 
 function onRenderToolbar(event: {
   reader: ReaderLike;
@@ -162,8 +168,25 @@ function togglePop(doc: Document, reader: ReaderLike, btn: HTMLElement): void {
     <label style="display:block;margin-bottom:6px">检测灵敏度
       <input id="pdfocr-thresh" type="number" min="0" max="1" step="0.05" style="width:100%;margin-top:2px;box-sizing:border-box" value="${p.detThresh}">
     </label>
-    <label style="display:block;margin-bottom:10px">文本框过滤
+    <label style="display:block;margin-bottom:6px">文本框过滤
       <input id="pdfocr-box" type="number" min="0" max="1" step="0.05" style="width:100%;margin-top:2px;box-sizing:border-box" value="${p.detBoxThresh}">
+    </label>
+    <label style="display:block;margin-bottom:10px">倾斜过滤（度）
+      <input id="pdfocr-maxrot" type="number" min="0" max="90" step="5" style="width:100%;margin-top:2px;box-sizing:border-box" value="${p.detMaxRotDeg}">
+    </label>
+    <label style="display:block;margin-bottom:10px">识别模式
+      <select id="pdfocr-cropmode" style="width:100%;margin-top:2px">
+        <option value="0"${p.cropMode === 0 ? " selected" : ""}>直立正文（AABB 直接裁剪）</option>
+        <option value="1"${p.cropMode === 1 ? " selected" : ""}>倾斜正文（旋转矫正）</option>
+        <option value="2"${p.cropMode === 2 ? " selected" : ""}>复合方法（推荐）</option>
+      </select>
+    </label>
+    <label style="display:block;margin-bottom:10px">并行核心数
+      <select id="pdfocr-workers" style="width:100%;margin-top:2px">
+        ${[1, 2, 3, 4, 5, 6, 7, 8].map((n) =>
+          `<option value="${n}"${n === p.ocrWorkers ? " selected" : ""}>${n} 核${n === 4 ? "（推荐）" : ""}</option>`,
+        ).join("")}
+      </select>
     </label>
     <button id="pdfocr-go" type="button" style="width:100%;padding:6px 0;border:0;border-radius:6px;background:#89b4fa;color:#1e1e2e;font-weight:600;cursor:pointer">OCR</button>
     <button id="pdfocr-strip" type="button" title="${STRIP_TIP}" style="width:100%;margin-top:6px;padding:6px 0;border:1px solid #45475a;border-radius:6px;background:#313244;color:#cdd6f4;cursor:pointer">删除 OCR 文字层</button>
@@ -212,6 +235,9 @@ function togglePop(doc: Document, reader: ReaderLike, btn: HTMLElement): void {
             detLimitSideLen: Number((pop.querySelector("#pdfocr-limit") as HTMLSelectElement).value) || p.detLimitSideLen,
             detThresh: clamp01((pop.querySelector("#pdfocr-thresh") as HTMLInputElement).value, p.detThresh),
             detBoxThresh: clamp01((pop.querySelector("#pdfocr-box") as HTMLInputElement).value, p.detBoxThresh),
+            detMaxRotDeg: clampDeg((pop.querySelector("#pdfocr-maxrot") as HTMLInputElement).value, p.detMaxRotDeg),
+            cropMode: clampMode((pop.querySelector("#pdfocr-cropmode") as HTMLSelectElement).value, p.cropMode),
+            ocrWorkers: Math.max(1, Math.min(8, Number((pop.querySelector("#pdfocr-workers") as HTMLSelectElement).value) || p.ocrWorkers)),
           }
         : { itemID: reader.itemID!, pages1 };
       dismissPop(doc);
@@ -237,6 +263,18 @@ function clamp01(raw: string, fallback: number): number {
   const n = Number(raw);
   if (!Number.isFinite(n)) return fallback;
   return Math.min(1, Math.max(0, n));
+}
+
+function clampDeg(raw: string, fallback: number): number {
+  const n = Number(raw);
+  if (!Number.isFinite(n)) return fallback;
+  return Math.min(90, Math.max(0, n));
+}
+
+function clampMode(raw: string, fallback: number): number {
+  const n = Number(raw);
+  if (n !== 0 && n !== 1 && n !== 2) return fallback;
+  return n;
 }
 
 export function registerReaderToolbar(

@@ -41,6 +41,9 @@ const DIALOG_HTML = `<!DOCTYPE html>
     line-height: 1.5; min-height: 40px; word-break: break-all;
   }
   #status-text { margin-top: 8px; font-size: 12px; color: #6c7086; }
+  .timer-line { margin-top: 6px; font-size: 12px; color: #6c7086; }
+  #timer-total-val, #timer-ocr-val { font-weight: 600; }
+  #timer-ocr-val { color: #a6e3a1; }
   #actions { margin-top: auto; display: flex; gap: 8px; justify-content: flex-end; }
   button {
     padding: 8px 20px; border: 1px solid #45475a; border-radius: 6px;
@@ -60,6 +63,8 @@ const DIALOG_HTML = `<!DOCTYPE html>
   <progress id="progress-bar" value="0" max="100"></progress>
   <div id="progress-text">0%</div>
   <div id="command-text">正在初始化...</div>
+  <div id="timer-total" class="timer-line">总用时 <span id="timer-total-val">0 s</span></div>
+  <div id="timer-ocr" class="timer-line">RapidOCR 已运行 <span id="timer-ocr-val">0 s</span></div>
   <div id="status-text"></div>
   <div id="actions">
     <button id="cancel-btn" class="primary">取消</button>
@@ -68,10 +73,26 @@ const DIALOG_HTML = `<!DOCTYPE html>
 </body>
 </html>`;
 
+/** "8 s" / "3 min 12 s" / "1 h 5 min 3 s" */
+function formatElapsed(ms: number): string {
+  const s = Math.max(0, Math.floor(ms / 1000));
+  const h = Math.floor(s / 3600);
+  const m = Math.floor((s % 3600) / 60);
+  const sec = s % 60;
+  if (h > 0) return `${h} h ${m} min ${sec} s`;
+  if (m > 0) return `${m} min ${sec} s`;
+  return `${sec} s`;
+}
+
 export class OcrProgressDialog {
   private win: Window | null = null;
   private cancelled = false;
   private onCancelCallback: (() => void) | null = null;
+  private totalInterval: number | null = null;
+  private ocrInterval: number | null = null;
+  private totalStart = 0;
+  private ocrStart = 0;
+  private ocrStarted = false;
 
   // ── lifecycle ───────────────────────────────────────────────────────
 
@@ -119,6 +140,9 @@ export class OcrProgressDialog {
 
     this.win = win;
 
+    // 计时器(2)：总用时，从打开对话框/开始解析 PDF 起算
+    this._startTotalTimer();
+
     // If the user closes the window manually, treat as cancel
     const winRef = win;
     win.addEventListener("beforeunload", () => {
@@ -143,9 +167,11 @@ export class OcrProgressDialog {
   // ── updates ─────────────────────────────────────────────────────────
 
   /** Update the progress bar and the command/instruction text. */
-  updateProgress(percent: number, _stage: string, command?: string): void {
+  updateProgress(percent: number, stage?: string, command?: string): void {
     const w = this.win;
     if (!w) return;
+    // 计时器(1)：纯 OCR 时间，从「已分配 n 核数」起算
+    if (stage === "alloc") this._startOcrTimer();
     const bar = w.document.getElementById("progress-bar") as HTMLProgressElement | null;
     const pct = w.document.getElementById("progress-text");
     const cmd = w.document.getElementById("command-text");
@@ -156,6 +182,7 @@ export class OcrProgressDialog {
 
   /** Show completion state — progress bar → 100%, status → "✓ 完成". */
   complete(message: string): void {
+    this._stopTimers();
     const w = this.win;
     if (!w) return;
     const bar = w.document.getElementById("progress-bar") as HTMLProgressElement | null;
@@ -174,6 +201,7 @@ export class OcrProgressDialog {
 
   /** Show failure state with the error message. */
   fail(message: string): void {
+    this._stopTimers();
     const w = this.win;
     if (!w) return;
     const cmd = w.document.getElementById("command-text");
@@ -205,6 +233,7 @@ export class OcrProgressDialog {
 
   private _onCancel(): void {
     this.cancelled = true;
+    this._stopTimers();
     this.onCancelCallback?.();
     const w = this.win;
     if (!w) return;
@@ -226,8 +255,40 @@ export class OcrProgressDialog {
     if (el) { el.textContent = text; el.className = ""; }
   }
 
+  // ── timers ───────────────────────────────────────────────────────────
+
+  private _startTotalTimer(): void {
+    this._stopTimers();
+    this.totalStart = Date.now();
+    this._renderTimer("timer-total-val", 0);
+    this.totalInterval = setInterval(() => {
+      this._renderTimer("timer-total-val", Date.now() - this.totalStart);
+    }, 1000) as unknown as number;
+  }
+
+  private _startOcrTimer(): void {
+    if (this.ocrStarted) return;
+    this.ocrStarted = true;
+    this.ocrStart = Date.now();
+    this._renderTimer("timer-ocr-val", 0);
+    this.ocrInterval = setInterval(() => {
+      this._renderTimer("timer-ocr-val", Date.now() - this.ocrStart);
+    }, 1000) as unknown as number;
+  }
+
+  private _renderTimer(valId: string, ms: number): void {
+    const el = this.win?.document.getElementById(valId);
+    if (el) el.textContent = formatElapsed(ms);
+  }
+
+  private _stopTimers(): void {
+    if (this.totalInterval !== null) { clearInterval(this.totalInterval); this.totalInterval = null; }
+    if (this.ocrInterval !== null) { clearInterval(this.ocrInterval); this.ocrInterval = null; }
+  }
+
   /** Force-close the window. */
   close(): void {
+    this._stopTimers();
     this.onCancelCallback = null;
     if (this.win) {
       try { this.win.close(); } catch {}

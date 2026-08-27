@@ -154,9 +154,12 @@ test("hooks wire job manager, progress dialog, and MenuManager", () => {
   assert.match(hooks, /jobManager\?\.shutdown\(\)/);
   assert.match(hooks, /createParentAndAttachOCR/);
   assert.match(hooks, /Services\.prompt/);
-  assert.match(hooks, /onnxruntime-web/);
-  assert.match(hooks, /WebAssembly\.instantiate/);
   assert.doesNotMatch(hooks, /controllers = new WeakMap/);
+});
+
+test("OCR worker bundles onnxruntime-web (WASM inference lives in the worker)", () => {
+  const worker = read("src/ocr/ocr-worker.ts");
+  assert.match(worker, /onnxruntime-web/);
 });
 
 test("build script copies addon and bundles XPI", () => {

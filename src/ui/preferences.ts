@@ -47,7 +47,7 @@ export async function registerPrefs(
     pluginID,
     id: PREFS_PANE_ID,
     src,
-    label: "PDF OCR",
+    label: "RapidOCR for Zotero",
     image: `${rootURI.replace(/\/$/, "")}/content/icons/pdf-ocr.svg`,
     scripts: [`${rootURI.replace(/\/$/, "")}/content/preferences.js`],
   });

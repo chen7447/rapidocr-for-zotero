@@ -342,9 +342,19 @@ async function handleSelection(resolution: SelectionResolution): Promise<void> {
   }
 
   const manager = ensureJobManager();
+  // JobManager 对"已在队列/处理中"的附件 enqueue 会 throw——收集跳过数而不是
+  // 让 forEach 中途炸断，静默丢掉剩余任务
+  let skipped = 0;
   resolution.jobs.forEach((job, index) => {
-    manager.enqueue(createJob(index, job.attachment, job.path, settings));
+    try {
+      manager.enqueue(createJob(index, job.attachment, job.path, settings));
+    } catch {
+      skipped++;
+    }
   });
+  if (skipped > 0) {
+    OcrProgressDialog.notify("OCR PDF", `${skipped} 个附件已在队列中，已跳过。`);
+  }
 }
 
 async function handlePageOcr(req: PageOcrRequest): Promise<void> {

@@ -41,10 +41,8 @@
   function readThresholdInt(key, fallbackPercent) {
     var v = Number(readPref(key));
     if (isNaN(v)) return fallbackPercent;
-    if (v === 0 || v < 1) {
-      return v > 0 && v < 1 ? Math.round(v * 100) : fallbackPercent;
-    }
-    return v;
+    if (v > 0 && v < 1) return Math.round(v * 100); // legacy float storage
+    return v; // >=1 stays a percentage; 0 is legitimate and must survive
   }
 
   function writeThreshold(key, percent) {
@@ -78,7 +76,8 @@
     }
     var maxRot = get("pdf-ocr-det-max-rot");
     if (maxRot) {
-      maxRot.value = String(Number(readPref("detMaxRotDeg")) || DEFAULT_MAX_ROT);
+      var mr = Number(readPref("detMaxRotDeg"));
+      maxRot.value = String(isNaN(mr) ? DEFAULT_MAX_ROT : mr); // 0 = filter off, keep it
     }
     var cropMode = get("pdf-ocr-crop-mode");
     if (cropMode) {

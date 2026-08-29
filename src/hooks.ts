@@ -12,6 +12,7 @@ import {
 import { Job } from "./domain/job";
 import { registerReaderToolbar, unregisterReaderToolbar, PageOcrRequest, StripRequest } from "./ui/reader-toolbar";
 import { toPageIndexes } from "./ocr/page-spec";
+import { parseOcrPrefs, RawPrefValue } from "./ocr/prefs";
 
 const initializedWindows = new WeakSet<Window>();
 let contextMenuController: ContextMenuController | null = null;
@@ -77,27 +78,25 @@ function createJob(jobIndex: number, item: SelectionItem, path: string, extra: P
   };
 }
 
-function readOcrPrefs(): { detLimitSideLen: number; detThresh: number; detBoxThresh: number; detMaxRotDeg: number; cropMode: number; ocrWorkers: number; autoOpen: boolean } {
+function readOcrPrefs(): ReturnType<typeof parseOcrPrefs> {
   const PREFIX = "pdfocrforzotero";
-  const detLimitSideLen = Number(Zotero.Prefs.get(PREFIX + ".detLimitSideLen")) || 1536;
-  const detThreshRaw = Number(Zotero.Prefs.get(PREFIX + ".detThresh")) || 0;
-  const detThreshPct = detThreshRaw >= 1 ? detThreshRaw : (detThreshRaw > 0 && detThreshRaw < 1 ? Math.round(detThreshRaw * 100) : 30);
-  const detBoxThreshRaw = Number(Zotero.Prefs.get(PREFIX + ".detBoxThresh")) || 0;
-  const detBoxThreshPct = detBoxThreshRaw >= 1 ? detBoxThreshRaw : (detBoxThreshRaw > 0 && detBoxThreshRaw < 1 ? Math.round(detBoxThreshRaw * 100) : 40);
-  const detMaxRotDeg = Number(Zotero.Prefs.get(PREFIX + ".detMaxRotDeg")) || 30;
-  const cropModeRaw = Number(Zotero.Prefs.get(PREFIX + ".cropMode"));
-  const cropMode = cropModeRaw === 0 || cropModeRaw === 1 ? cropModeRaw : 2;
-  const ocrWorkersRaw = Number(Zotero.Prefs.get(PREFIX + ".ocrWorkers"));
-  const ocrWorkers = Number.isInteger(ocrWorkersRaw) && ocrWorkersRaw >= 1 ? ocrWorkersRaw : 4;
-  return {
-    detLimitSideLen,
-    detThresh: detThreshPct / 100,
-    detBoxThresh: detBoxThreshPct / 100,
-    detMaxRotDeg,
-    cropMode,
-    ocrWorkers,
-    autoOpen: !!Zotero.Prefs.get(PREFIX + ".autoOpenAfterSuccess"),
+  // 未注册的键读起来可能抛错；null/undefined 一律交由 parseOcrPrefs 当"未设置"处理
+  const get = (key: string): RawPrefValue => {
+    try {
+      return Zotero.Prefs.get(PREFIX + "." + key) as RawPrefValue;
+    } catch {
+      return undefined;
+    }
   };
+  return parseOcrPrefs({
+    detLimitSideLen: get("detLimitSideLen"),
+    detThresh: get("detThresh"),
+    detBoxThresh: get("detBoxThresh"),
+    detMaxRotDeg: get("detMaxRotDeg"),
+    cropMode: get("cropMode"),
+    ocrWorkers: get("ocrWorkers"),
+    autoOpenAfterSuccess: get("autoOpenAfterSuccess"),
+  });
 }
 
 function siblingAttachments(item: SelectionItem): SelectionItem[] {

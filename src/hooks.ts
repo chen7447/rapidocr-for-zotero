@@ -211,8 +211,11 @@ function ensureJobManager(): JobManager {
             return;
           }
 
-          const { createOCRAttachment, createParentAndAttachOCR } = await import("./zotero/attachment-service");
-          const outputPath = job.path.replace(/\.pdf$/i, "-ocr.pdf");
+          const { createOCRAttachment, createParentAndAttachOCR, deriveOcrOutputPath } = await import("./zotero/attachment-service");
+          const outputPath = deriveOcrOutputPath(job.path);
+          if (outputPath.toLowerCase() === job.path.toLowerCase()) {
+            throw new Error(`无法为 ${job.path} 推导安全的 OCR 输出路径，已中止（不会覆盖源文件）`);
+          }
           await IOUtils.write(outputPath, outputPdf);
 
           let ocrAttachmentID: number | undefined;

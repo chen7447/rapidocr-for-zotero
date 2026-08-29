@@ -464,14 +464,15 @@ export function nmsBoxes<T extends BoxLike>(boxes: T[], contain = 0.7, iou = 0.5
 
 /** Full-wide threshold as a share of page width (titles/abstracts/spanning figures). */
 const FULL_WIDE_SHARE = 0.55;
-/** A blank vertical band must be at least this share of page width to count as a gutter. */
-const GUTTER_MIN_SHARE = 0.035;
+/** A blank vertical band must be at least this share of page width to count as a gutter.
+ *  1.2% ≈ 14px @A4/144dpi — dense journal gutters measure only ~1.7-2.1% (实测 Springer
+ *  排版 4-5mm 栏间距)；贯穿全部行高的连续细缝在单栏内几乎不存在，误判由显著性检查兜底。 */
+const GUTTER_MIN_SHARE = 0.012;
 /** Each side of a gutter needs at least this many boxes… */
 const GUTTER_MIN_BOXES = 3;
 /** …and at least this share of the non-full-wide boxes. */
 const GUTTER_MIN_SHARE_BOXES = 0.15;
-/** x-projection resolution (buckets across the page width). */
-const HIST_BUCKETS = 100;
+/** x 区间精确扫描（排序 + 单遍合并），无分桶量化误差——19px 的窄沟也能测出。 */
 /** More candidate columns than this → pathological, fall back to single column. */
 const MAX_COLUMNS = 3;
 
@@ -505,41 +506,20 @@ function detectColumnGroups<T extends BoxLike>(boxes: T[], pageWidth: number): T
   }
   if (rest.length < 6) return null;
 
-  // x-projection coverage of the non-full-wide boxes
-  const cov = new Uint16Array(HIST_BUCKETS);
-  for (const b of rest) {
-    const a = Math.max(0, Math.min(HIST_BUCKETS - 1, Math.floor((b.raw.x1 / pageWidth) * HIST_BUCKETS)));
-    const z = Math.max(1, Math.min(HIST_BUCKETS, Math.ceil((b.raw.x2 / pageWidth) * HIST_BUCKETS)));
-    for (let i = a; i < z; i++) cov[i]++;
+  // Sort intervals by x1, sweep once to find vertical blank bands (exact, no quantization)
+  const sorted = rest.map((b) => [b.raw.x1, b.raw.x2] as [number, number]).sort((p, q) => p[0] - q[0]);
+  const minGapPx = GUTTER_MIN_SHARE * pageWidth;
+  const cuts: number[] = []; // midpoint of each detected gutter
+  let contentStart = sorted[0][0];
+  let curEnd = sorted[0][1];
+  for (const [x1, x2] of sorted) {
+    if (x1 - curEnd >= minGapPx) cuts.push((curEnd + x1) / 2);
+    if (x2 > curEnd) curEnd = x2;
   }
-  let first = -1;
-  let last = -1;
-  for (let k = 0; k < HIST_BUCKETS; k++) {
-    if (cov[k] > 0) {
-      if (first < 0) first = k;
-      last = k;
-    }
-  }
-  if (first < 0) return null;
-
-  const minGap = Math.max(1, Math.round(GUTTER_MIN_SHARE * HIST_BUCKETS));
-  const cuts: number[] = []; // bucket index where coverage resumes after each gutter
-  let runStart = -1;
-  for (let k = first; k <= last; k++) {
-    if (cov[k] === 0) {
-      if (runStart < 0) runStart = k;
-    } else {
-      if (runStart >= 0 && k - runStart >= minGap) cuts.push(k);
-      runStart = -1;
-    }
-  }
+  const contentEnd = curEnd;
   if (cuts.length < 1 || cuts.length > MAX_COLUMNS - 1) return null;
 
-  const bounds: number[] = [
-    (first / HIST_BUCKETS) * pageWidth,
-    ...cuts.map((c) => (c / HIST_BUCKETS) * pageWidth),
-    ((last + 1) / HIST_BUCKETS) * pageWidth,
-  ];
+  const bounds: number[] = [contentStart, ...cuts, contentEnd];
   const groups: T[][] = Array.from({ length: bounds.length - 1 }, () => []);
   const minSide = Math.max(GUTTER_MIN_BOXES, Math.ceil(rest.length * GUTTER_MIN_SHARE_BOXES));
   for (const b of rest) {

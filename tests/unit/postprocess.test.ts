@@ -117,3 +117,18 @@ test("nmsBoxes without pageWidth keeps the plain readingOrder behavior", () => {
   const want = readingOrder(boxes).map((b) => b.raw);
   assert.deepEqual(got, want);
 });
+
+test("orderBoxes splits a dense two-column page with a ~1.8% gutter (实测回归)", () => {
+  // 复刻用户实测的 Springer 紧凑排版：页宽 1190，左栏 33-563，右栏 582-1153，
+  // 沟宽约 21px（1.76% 页宽）——旧阈值 3.5% 判不出，1.2% 必须切列
+  const left = colBoxes(33, 563, 8, 100);
+  const right = colBoxes(582, 1153, 8, 100);
+  const boxes = [];
+  for (let r = 0; r < 8; r++) { boxes.push(left[r], right[r]); }
+  const out = orderBoxes(boxes, 1190);
+  assert.equal(out.length, 16);
+  for (let i = 0; i < 8; i++) assert.ok(out[i].raw.x1 < 575, 'first half must be left column');
+  for (let i = 8; i < 16; i++) assert.ok(out[i].raw.x1 > 575, 'second half must be right column');
+  for (let i = 1; i < 8; i++) assert.ok(out[i].raw.y1 > out[i - 1].raw.y1);
+  for (let i = 9; i < 16; i++) assert.ok(out[i].raw.y1 > out[i - 1].raw.y1);
+});

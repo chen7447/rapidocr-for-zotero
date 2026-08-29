@@ -142,7 +142,18 @@ export async function addOcrLayerToPdf(
       ? (pageResult.pageWidthPoints || pw) / pageResult.pageWidth
       : 0.5;
 
-    for (const box of orderBoxes(pageResult.boxes, pageResult.pageWidth)) {
+    const orderedBoxes = orderBoxes(pageResult.boxes, pageResult.pageWidth);
+    // 诊断（debug pref）：该页最终用了列排序还是单列排序
+    try {
+      if (Zotero.Prefs.get("pdfocrforzotero.debug")) {
+        let reordered = false;
+        for (let i = 0; i < orderedBoxes.length; i++) {
+          if (orderedBoxes[i] !== pageResult.boxes[i]) { reordered = true; break; }
+        }
+        Zotero.debug(`PDF OCR v3: page ${pi + 1} — ${reordered ? "column-aware order applied" : "single-column order"}`);
+      }
+    } catch { /* diag only */ }
+    for (const box of orderedBoxes) {
       const text = box.text.trim();
       if (!text) continue;
 

@@ -142,16 +142,15 @@ export async function addOcrLayerToPdf(
       ? (pageResult.pageWidthPoints || pw) / pageResult.pageWidth
       : 0.5;
 
-    const orderedBoxes = orderBoxes(pageResult.boxes, pageResult.pageWidth);
-    // 诊断（debug pref）：该页最终用了列排序还是单列排序
+    // 诊断（测试构建期无条件打印）：该页最终用了列排序还是单列排序、为什么
+    const diag: import("./postprocess").ColumnDiag = { reason: "", cuts: 0, gaps: [] };
+    const orderedBoxes = orderBoxes(pageResult.boxes, pageResult.pageWidth, diag);
     try {
-      if (Zotero.Prefs.get("pdfocrforzotero.debug")) {
-        let reordered = false;
-        for (let i = 0; i < orderedBoxes.length; i++) {
-          if (orderedBoxes[i] !== pageResult.boxes[i]) { reordered = true; break; }
-        }
-        Zotero.debug(`PDF OCR v3: page ${pi + 1} — ${reordered ? "column-aware order applied" : "single-column order"}`);
+      let reordered = false;
+      for (let i = 0; i < orderedBoxes.length; i++) {
+        if (orderedBoxes[i] !== pageResult.boxes[i]) { reordered = true; break; }
       }
+      Zotero.debug(`PDF OCR v3: page ${pi + 1} build ${addonVersion} — ${reordered ? "column-aware order" : "single-column order"} (reason=${diag.reason}, cuts=${diag.cuts}, gapsPx=[${diag.gaps.map((g) => Math.round(g)).join(",")}], boxes=${pageResult.boxes.length}, pageW=${Math.round(pageResult.pageWidth)})`);
     } catch { /* diag only */ }
     for (const box of orderedBoxes) {
       const text = box.text.trim();

@@ -217,7 +217,7 @@ function ensureJobManager(): JobManager {
             activeEngine = null;
             engine.dispose();
           }
-          log(`job ${job.jobId} — OCR done: ${result.pages.length} pages`);
+          log(`job ${job.jobId} — OCR done: ${result.pages.length} pages, build ${addonVersion}`);
 
           dlg?.updateTask(job.jobId, 90, "v3", t("hooks.rebuilding"));
 

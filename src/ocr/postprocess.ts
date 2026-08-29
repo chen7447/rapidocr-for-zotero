@@ -476,16 +476,28 @@ const GUTTER_MIN_SHARE_BOXES = 0.15;
 /** More candidate columns than this → pathological, fall back to single column. */
 const MAX_COLUMNS = 3;
 
+/** 诊断输出：列检测的结果与回退原因（测试构建期无条件打印，正式版再收口）。 */
+export interface ColumnDiag {
+  reason: string;
+  cuts: number;
+  /** 实测的纵向空白带宽度（px，降序前几条） */
+  gaps: number[];
+}
+
 /**
  * Page-level reading order with optional column detection.
  * 双栏页面按「左栏全部 → 右栏全部」排序；单栏与无法确定的情况走原
  * `readingOrder()`（单列语义）。检测是保守的：任何显著性/位置条件不满足
  * 都回退——最坏情况 = v1.9 行为，永不劣化。
  */
-export function orderBoxes<T extends BoxLike>(boxes: T[], pageWidth?: number): T[] {
-  if (!pageWidth || pageWidth <= 0 || boxes.length < 8) return readingOrder(boxes);
-  const groups = detectColumnGroups(boxes, pageWidth);
+export function orderBoxes<T extends BoxLike>(boxes: T[], pageWidth?: number, diag?: ColumnDiag): T[] {
+  if (!pageWidth || pageWidth <= 0 || boxes.length < 8) {
+    if (diag) { diag.reason = "too-few-boxes-or-no-width"; diag.cuts = 0; diag.gaps = []; }
+    return readingOrder(boxes);
+  }
+  const groups = detectColumnGroups(boxes, pageWidth, diag);
   if (!groups) return readingOrder(boxes);
+  if (diag) diag.reason = "ok";
   const out: T[] = [];
   for (const group of groups) out.push(...readingOrder(group));
   return out;
@@ -497,27 +509,39 @@ export function orderBoxes<T extends BoxLike>(boxes: T[], pageWidth?: number): T
  * — as a leading group — when they all sit ABOVE the columnar body; any
  * mid-page spanning element means the layout is not a clean column grid.
  */
-function detectColumnGroups<T extends BoxLike>(boxes: T[], pageWidth: number): T[][] | null {
+function detectColumnGroups<T extends BoxLike>(boxes: T[], pageWidth: number, diag?: ColumnDiag): T[][] | null {
+  const setDiag = (reason: string, cuts: number, gaps: number[]): void => {
+    if (diag) { diag.reason = reason; diag.cuts = cuts; diag.gaps = gaps; }
+  };
   const fullWideLimit = FULL_WIDE_SHARE * pageWidth;
   const fullWide: T[] = [];
   const rest: T[] = [];
   for (const b of boxes) {
     (b.raw.x2 - b.raw.x1 >= fullWideLimit ? fullWide : rest).push(b);
   }
-  if (rest.length < 6) return null;
+  if (rest.length < 6) {
+    setDiag("too-few-body-boxes", 0, []);
+    return null;
+  }
 
   // Sort intervals by x1, sweep once to find vertical blank bands (exact, no quantization)
   const sorted = rest.map((b) => [b.raw.x1, b.raw.x2] as [number, number]).sort((p, q) => p[0] - q[0]);
   const minGapPx = GUTTER_MIN_SHARE * pageWidth;
   const cuts: number[] = []; // midpoint of each detected gutter
+  const allGaps: number[] = [];
   let contentStart = sorted[0][0];
   let curEnd = sorted[0][1];
   for (const [x1, x2] of sorted) {
-    if (x1 - curEnd >= minGapPx) cuts.push((curEnd + x1) / 2);
+    const gap = x1 - curEnd;
+    if (gap > 0) allGaps.push(gap);
+    if (gap >= minGapPx) cuts.push((curEnd + x1) / 2);
     if (x2 > curEnd) curEnd = x2;
   }
   const contentEnd = curEnd;
-  if (cuts.length < 1 || cuts.length > MAX_COLUMNS - 1) return null;
+  allGaps.sort((p, q) => q - p);
+  setDiag("pending", cuts.length, allGaps.slice(0, 4));
+  if (cuts.length < 1) { setDiag("no-gutter-widest-" + Math.round(allGaps[0] ?? 0) + "px", 0, allGaps.slice(0, 4)); return null; }
+  if (cuts.length > MAX_COLUMNS - 1) { setDiag("too-many-cuts", cuts.length, allGaps.slice(0, 4)); return null; }
 
   const bounds: number[] = [contentStart, ...cuts, contentEnd];
   const groups: T[][] = Array.from({ length: bounds.length - 1 }, () => []);
@@ -528,11 +552,18 @@ function detectColumnGroups<T extends BoxLike>(boxes: T[], pageWidth: number): T
     while (gi < cuts.length && cx >= bounds[gi + 1]) gi++;
     groups[gi].push(b);
   }
-  if (groups.some((g) => g.length < minSide)) return null;
+  if (groups.some((g) => g.length < minSide)) {
+    setDiag("weak-side", cuts.length, allGaps.slice(0, 4));
+    return null;
+  }
 
   if (fullWide.length) {
     const bodyTop = Math.min(...rest.map((b) => b.raw.y1));
-    if (!fullWide.every((b) => b.raw.y2 <= bodyTop)) return null;
+    if (!fullWide.every((b) => b.raw.y2 <= bodyTop)) {
+      setDiag("midpage-spanning-full-wide", cuts.length, allGaps.slice(0, 4));
+      return null;
+    }
+    setDiag("ok-with-fullwide-header", cuts.length, allGaps.slice(0, 4));
     return [fullWide, ...groups];
   }
   return groups;

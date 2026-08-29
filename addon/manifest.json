@@ -1,7 +1,7 @@
 {
   "manifest_version": 2,
   "name": "RapidOCR for Zotero",
-  "version": "1.9.2",
+  "version": "1.10.0b1",
   "description": "开装即用：在 Zotero 内用 RapidOCR 把扫描 PDF 做成可搜索、可选择的 PDF。无需 Python / Tesseract。",
   "author": "chen7447",
   "homepage_url": "https://github.com/chen7447/rapidocr-for-zotero",

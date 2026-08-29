@@ -119,6 +119,46 @@ test("cancelRemaining clears all queued jobs without starting them", async () =>
   assert.equal(manager.get("C")?.status, "cancelled");
 });
 
+test("cancelJob cancels a queued job in place and leaves the queue intact", async () => {
+  const manager = new JobManager({
+    async execute() { await new Promise(() => {}); },
+    kill() {},
+  });
+  const listener = new FakeListener();
+  manager.addListener(listener);
+  const a = makeJob({ jobId: "A", attachmentID: 1 });
+  const b = makeJob({ jobId: "B", attachmentID: 2 });
+  const c = makeJob({ jobId: "C", attachmentID: 3 });
+  manager.enqueue(a);
+  await Promise.resolve();
+  manager.enqueue(b);
+  manager.enqueue(c);
+  manager.cancelJob("B");
+  assert.equal(manager.get("A")?.status, "running");
+  assert.equal(manager.get("B")?.status, "cancelled");
+  assert.equal(manager.get("C")?.status, "queued");
+  assert.deepEqual(listener.cancelled, ["B"]);
+  // idempotent: cancelling again is a no-op
+  manager.cancelJob("B");
+  assert.deepEqual(listener.cancelled, ["B"]);
+});
+
+test("cancelJob on the running job behaves like cancelCurrent", async () => {
+  let killed = false;
+  const manager = new JobManager({
+    async execute() { await new Promise(() => {}); },
+    kill() { killed = true; },
+  });
+  const listener = new FakeListener();
+  manager.addListener(listener);
+  manager.enqueue(makeJob({ jobId: "A", attachmentID: 1 }));
+  await Promise.resolve();
+  manager.cancelJob("A");
+  assert.equal(manager.get("A")?.status, "cancelled");
+  assert.equal(killed, true);
+  assert.deepEqual(listener.cancelled, ["A"]);
+});
+
 test("shutdown clears all listeners and stops the active job", async () => {
   let killed = false;
   const manager = new JobManager({

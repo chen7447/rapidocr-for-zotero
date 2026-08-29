@@ -138,7 +138,8 @@ function confirmCreateParent(title: string): boolean {
 function ensureQueueDialog(): OcrQueueDialog {
   if (!queueDialog) {
     queueDialog = new OcrQueueDialog();
-    queueDialog.setOnCancelCurrent(() => jobManager?.cancelCurrent());
+    // 每张卡片自己的"取消"按钮：按 jobId 精确取消（运行中的等价于取消当前）
+    queueDialog.setOnCancelTask((jobId) => jobManager?.cancelJob(jobId));
     queueDialog.setOnCancelAll(() => {
       jobManager?.cancelCurrent();
       jobManager?.cancelRemaining();

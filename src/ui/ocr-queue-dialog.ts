@@ -4,9 +4,10 @@
  * ONE window embeds ONE CARD per OCR job (用户要求的大窗套小窗布局):
  * every enqueued PDF gets its own card with an independent progress bar,
  * status, message and dual timers — all cards visible at once, no tabs.
- * A queued card shows 等待中…（等待《运行中文件》完成）.
- * 取消当前任务 aborts the running job only; 全部取消 also clears the queue;
- * closing the window while tasks are active counts as 全部取消.
+ * A queued card shows 等待中…（等待《运行中文件》完成）. Every ACTIVE card
+ * carries its own 取消 button (bottom-right): it cancels that job — running
+ * or queued. 全部取消 clears current + queue; closing the window while tasks
+ * are active counts as 全部取消.
  *
  * Rendering constraint (learned the hard way): in this chrome about:blank
  * window, innerHTML injection silently produced nothing — while every
@@ -43,6 +44,7 @@ type TaskRefs = {
   pct: HTMLSpanElement;
   total: HTMLSpanElement;
   ocr: HTMLSpanElement;
+  cancel: HTMLButtonElement;
 };
 
 type QueueTask = {
@@ -127,6 +129,10 @@ const QUEUE_HTML = `<!DOCTYPE html>
   .ocr-msg { word-break: break-all; }
   .ocr-pct { flex: none; color: #6c7086; }
   .ocr-timers { margin-top: 4px; font-size: 11px; color: #6c7086; }
+  .ocr-foot { display: flex; justify-content: flex-end; margin-top: 8px; }
+  .ocr-cancel {
+    padding: 2px 12px; font-size: 11px; border-radius: 4px;
+  }
   #actions { flex: none; display: flex; gap: 8px; justify-content: flex-end; }
   button {
     padding: 8px 16px; border: 1px solid #45475a; border-radius: 6px;
@@ -143,7 +149,6 @@ const QUEUE_HTML = `<!DOCTYPE html>
   <h1>RapidOCR for Zotero</h1>
   <div id="task-list"></div>
   <div id="actions">
-    <button id="cancel-current-btn" class="primary">取消当前任务</button>
     <button id="cancel-all-btn">全部取消</button>
     <button id="close-btn" class="hidden">关闭</button>
   </div>
@@ -160,7 +165,7 @@ export class OcrQueueDialog {
   /** Guards the window-level beforeunload handler against stale reuse. */
   private openToken = 0;
   private tick: number | null = null;
-  private onCancelCurrentCb: (() => void) | null = null;
+  private onCancelTaskCb: ((jobId: string) => void) | null = null;
   private onCancelAllCb: (() => void) | null = null;
 
   // ── lifecycle ───────────────────────────────────────────────────────
@@ -183,9 +188,6 @@ export class OcrQueueDialog {
     this.win = win;
     this.detached = false;
 
-    win.document.getElementById("cancel-current-btn")?.addEventListener("click", () => {
-      this.onCancelCurrentCb?.();
-    });
     win.document.getElementById("cancel-all-btn")?.addEventListener("click", () => {
       this.requestCancelAll();
     });
@@ -220,7 +222,7 @@ export class OcrQueueDialog {
     qdbg(`open: token=${token}`);
   }
 
-  setOnCancelCurrent(cb: () => void): void { this.onCancelCurrentCb = cb; }
+  setOnCancelTask(cb: (jobId: string) => void): void { this.onCancelTaskCb = cb; }
   setOnCancelAll(cb: () => void): void { this.onCancelAllCb = cb; }
 
   isClosed(): boolean {
@@ -437,8 +439,16 @@ export class OcrQueueDialog {
     const total = this.el("span", "", timers);
     timers.append(" · RapidOCR ");
     const ocr = this.el("span", "", timers);
+    const foot = this.el("div", "ocr-foot", root);
+    const cancel = this.el("button", "ocr-cancel", foot) as HTMLButtonElement;
+    cancel.type = "button";
+    cancel.textContent = "取消";
+    cancel.addEventListener("click", (ev: Event) => {
+      ev.preventDefault();
+      this.onCancelTaskCb?.(id);
+    });
 
-    t.refs = { root, state, bar, msg, pct, total, ocr };
+    t.refs = { root, state, bar, msg, pct, total, ocr, cancel };
     this.paint(t);
   }
 
@@ -467,6 +477,8 @@ export class OcrQueueDialog {
       }
       r.msg.textContent = t.message;
     }
+    // 终态卡片不再提供取消入口
+    r.cancel.classList.toggle("hidden", t.status !== "queued" && t.status !== "running");
     this.paintTimers(t);
   }
 
@@ -483,11 +495,9 @@ export class OcrQueueDialog {
   private renderButtons(): void {
     const w = this.win;
     if (!w) return;
-    const cancelCurrent = w.document.getElementById("cancel-current-btn") as HTMLButtonElement | null;
     const cancelAll = w.document.getElementById("cancel-all-btn") as HTMLButtonElement | null;
     const closeBtn = w.document.getElementById("close-btn");
     const anyActive = [...this.tasks.values()].some((t) => t.status === "queued" || t.status === "running");
-    if (cancelCurrent) cancelCurrent.disabled = !this.runningId;
     if (cancelAll) cancelAll.disabled = !anyActive;
     if (closeBtn) closeBtn.classList.toggle("hidden", anyActive);
   }

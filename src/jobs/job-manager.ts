@@ -65,6 +65,18 @@ export class JobManager {
     this.currentJob = null;
   }
 
+  /** Cancel one job: the running one (same as cancelCurrent) or a queued one in place. */
+  cancelJob(jobId: string): void {
+    if (this.currentJob?.jobId === jobId) {
+      this.cancelCurrent();
+      return;
+    }
+    const job = this.jobs.get(jobId);
+    if (!job || job.status !== "queued") return;
+    transitionJob(job, "cancelled");
+    this.emitCancelled(job);
+  }
+
   cancelRemaining(): void {
     for (const job of this.jobs.values()) {
       if (job.status === "queued") {

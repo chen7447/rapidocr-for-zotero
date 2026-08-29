@@ -173,6 +173,24 @@
     }
   }
 
+  function ensureL10n() {
+    // 面板是独立文档：确保 Fluent 资源链接存在，data-l10n-id 才会被翻译。
+    // 正常情况下 preferences.xhtml 的 head 里已带 <link rel="localization">；
+    // 这里兜底补插（幂等）。失败则保留 XHTML 内的中文兜底文案。
+    try {
+      if (!document.querySelector("[data-l10n-id]")) return;
+      var links = document.querySelectorAll('link[rel="localization"]');
+      for (var i = 0; i < links.length; i++) {
+        if (/pdfocrforzotero-mainWindow\.ftl/.test(links[i].getAttribute("href") || "")) return;
+      }
+      if (window.MozXULElement && window.MozXULElement.insertFTLIfNeeded) {
+        window.MozXULElement.insertFTLIfNeeded("pdfocrforzotero-mainWindow.ftl");
+      }
+    } catch (e) {
+      Zotero.debug("[PDF OCR prefs] l10n link inject failed: " + e);
+    }
+  }
+
   function tryInit() {
     if (!get("pdf-ocr-det-limit")) return;
     if (!bound) {
@@ -180,6 +198,7 @@
       bindEvents();
       showVersionInfo();
     }
+    ensureL10n();
     loadSettings();
   }
 

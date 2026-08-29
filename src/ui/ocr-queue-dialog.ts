@@ -205,8 +205,10 @@ export class OcrQueueDialog {
     });
 
     if (this.tick !== null) clearInterval(this.tick);
+    // 每秒对账：卡片丢失/挂在旧文档上（环境原因可能发生）就重建，并刷新全部
+    // 状态——窗口状态在 1 秒内自愈，不依赖单次渲染是否成功。
     this.tick = setInterval(() => {
-      for (const t of this.tasks.values()) this.paintTimers(t);
+      try { this.reconcile(); } catch (err) { qdbg(`reconcile failed: ${err}`); }
     }, 1000) as unknown as number;
 
     // Re-opened after a close: redraw the retained history.
@@ -276,6 +278,17 @@ export class OcrQueueDialog {
       this.tasks.set(id, t);
       this.order.push(id);
     }
+    // 新一批开始时清掉上一批的遗留卡片：没有其他进行中/排队任务，
+    // 而窗口里还挂着已终态的旧卡片 → 全部移除（用户要求不保留旧卡）
+    const othersActive = [...this.tasks.values()].some(
+      (x) => x !== t && (x.status === "queued" || x.status === "running"),
+    );
+    if (!othersActive) {
+      for (const k of [...this.order]) {
+        const x = this.tasks.get(k);
+        if (x && x !== t && x.status !== "queued" && x.status !== "running") this.removeTask(k);
+      }
+    }
     t.status = "running";
     t.totalStart = Date.now();
     t.ocrStart = null;
@@ -314,9 +327,50 @@ export class OcrQueueDialog {
     qdbg(`finishTask(${id}) → ${status} — tasks=${this.tasks.size}`);
     this.paint(t);
     this.renderButtons();
+    if (status === "completed" || status === "cancelled") {
+      // 完成/取消的卡片 8 秒后自动移除——窗口只留进行中的任务
+      setTimeout(() => this.removeTask(id), 8000);
+    }
+  }
+
+  /** Drop a task and its card entirely (auto-cleanup / next-batch purge). */
+  private removeTask(id: string): void {
+    const t = this.tasks.get(id);
+    if (!t) return;
+    try { t.refs?.root.remove(); } catch { /* detached */ }
+    this.tasks.delete(id);
+    const i = this.order.indexOf(id);
+    if (i >= 0) this.order.splice(i, 1);
+    qdbg(`removeTask(${id}) — tasks=${this.tasks.size}`);
+    this.renderButtons();
   }
 
   // ── card rendering (createElement only — innerHTML is a proven no-op here) ──
+
+  /**
+   * 每秒对账自愈：任何任务没有卡片、或卡片挂在旧文档/已断连（环境可能导致
+   * append 后不显示），就地重建；然后重画全部状态。1 秒内收敛。
+   */
+  private reconcile(): void {
+    const w = this.win;
+    if (!w) return;
+    let rebuilt = 0;
+    for (const id of [...this.order]) {
+      const t = this.tasks.get(id);
+      if (!t) continue;
+      const stale = !t.refs
+        || !t.refs.root.isConnected
+        || t.refs.root.ownerDocument !== w.document;
+      if (stale) {
+        t.refs = null;
+        this.buildCard(id);
+        rebuilt++;
+      } else {
+        this.paint(t);
+      }
+    }
+    if (rebuilt) qdbg(`reconcile rebuilt ${rebuilt} card(s) — tasks=${this.tasks.size}`);
+  }
 
   /** Rebuild every card from retained state (window re-open). */
   private rebuildCards(): void {

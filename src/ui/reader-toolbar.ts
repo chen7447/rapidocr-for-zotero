@@ -62,7 +62,7 @@ function onRenderToolbar(event: {
   btn.id = BTN_ID;
   btn.type = "button";
   btn.className = "toolbar-button";
-  btn.title = "OCR 当前页";
+  btn.title = "OCR 当前页（已有 OCR 文字层会被自动替换）";
   btn.setAttribute("aria-label", "OCR 当前页");
   // 图标用 data URI 内联 SVG + currentColor：pdf.js iframe 沙箱内
   // chrome:// 与 context-fill 均无法解析，data URI 最可靠且跟随主题色。

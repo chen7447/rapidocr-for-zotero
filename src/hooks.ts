@@ -131,19 +131,20 @@ function confirmCreateParent(title: string): boolean {
 // ─── Job manager ───
 
 /**
- * 队列进度窗：整个 JobManager 生命周期共用一个窗口，任务以标签页呈现。
+ * 队列进度窗：整个会话共用一个实例、一个窗口，任务以标签页呈现。
+ * 关窗后重开时沿用实例（任务历史保留），实例与窗口永不错位。
  * 用户手关窗口 = 全部取消（沿用旧单任务窗语义）。
  */
 function ensureQueueDialog(): OcrQueueDialog {
-  if (!queueDialog || queueDialog.isClosed()) {
+  if (!queueDialog) {
     queueDialog = new OcrQueueDialog();
-    queueDialog.open();
     queueDialog.setOnCancelCurrent(() => jobManager?.cancelCurrent());
     queueDialog.setOnCancelAll(() => {
       jobManager?.cancelCurrent();
       jobManager?.cancelRemaining();
     });
   }
+  if (queueDialog.isClosed()) queueDialog.open();
   return queueDialog;
 }
 

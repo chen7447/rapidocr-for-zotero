@@ -8,15 +8,25 @@
  * also clears the queue. Closing the window while tasks are active counts as
  * 全部取消 (same semantic as the old single-task dialog).
  *
- * Mirrors ocr-dialog.ts: HTML embedded, window via Services.ww.openWindow.
- * Lifecycle is driven from two places:
- *   - hooks.ts enqueues → addTask(jobId, title) so the tab appears at once
- *   - JobManager listener: onJobStarted → markRunning, onJobCancelled →
- *     finishTask (queued jobs killed by 全部取消 never reach the executor);
- *     the executor itself drives updateTask / finishTask(completed|failed).
+ * Lifecycle: hooks.ts keeps ONE instance for the whole session (see
+ * ensureQueueDialog) and re-opens it when closed — task history survives a
+ * window close, and the tabs can never diverge from the window (the
+ * instance↔window pairing is guarded by an open token). Renders are wrapped:
+ * one failing render must not drop the others, and every mutation is logged
+ * behind the pdfocrforzotero.debug pref so a missing-tab report comes with
+ * evidence.
  */
 
 import { formatElapsed } from "./ocr-dialog";
+
+function qdbg(msg: string): void {
+  try {
+    if (!Zotero.Prefs.get("pdfocrforzotero.debug")) return;
+  } catch {
+    return;
+  }
+  Zotero.debug(`PDF OCR v3 queue-dialog: ${msg}`);
+}
 
 type TaskStatus = "queued" | "running" | "completed" | "failed" | "cancelled";
 
@@ -61,9 +71,7 @@ const QUEUE_HTML = `<!DOCTYPE html>
     padding: 20px; height: 100vh; display: flex; flex-direction: column;
     user-select: none;
   }
-  .header { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 14px; }
-  h1 { font-size: 16px; font-weight: 600; }
-  #author { font-size: 11px; color: #6c7086; }
+  h1 { font-size: 16px; font-weight: 600; margin-bottom: 14px; }
   #task-tabs { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 16px; min-height: 26px; }
   .tab {
     display: inline-flex; align-items: center; gap: 6px;
@@ -109,10 +117,7 @@ const QUEUE_HTML = `<!DOCTYPE html>
 </style>
 </head>
 <body>
-  <div class="header">
-    <h1>RapidOCR for Zotero</h1>
-    <span id="author">--Chen7447</span>
-  </div>
+  <h1>RapidOCR for Zotero</h1>
   <div id="task-tabs"></div>
   <progress id="progress-bar" value="0" max="100"></progress>
   <div id="progress-text">0%</div>
@@ -142,13 +147,21 @@ export class OcrQueueDialog {
   private runningId: string | null = null;
   /** Programmatic close (strip flow / shutdown) must NOT trigger cancel. */
   private detached = false;
+  /** Guards the window-level beforeunload handler against stale reuse. */
+  private openToken = 0;
   private tick: number | null = null;
   private onCancelCurrentCb: (() => void) | null = null;
   private onCancelAllCb: (() => void) | null = null;
 
   // ── lifecycle ───────────────────────────────────────────────────────
 
+  /**
+   * Open (or re-open) the window. Task history is kept across re-opens —
+   * hooks reuses one instance for the whole session, so the tabs can never
+   * end up in a different instance than the visible window.
+   */
   open(): void {
+    const token = ++this.openToken;
     const win = (Services as unknown as {
       ww: { openWindow(parent: unknown, url: string, name: string, features: string, args: unknown): Window };
     }).ww.openWindow(null, "about:blank", "ocr-pdf-queue", "chrome,resizable,centerscreen,width=560,height=500", null);
@@ -168,16 +181,30 @@ export class OcrQueueDialog {
     });
     win.document.getElementById("close-btn")?.addEventListener("click", () => this.close());
 
-    // User closes the window manually while tasks are active → 全部取消
+    // User closes the window manually while tasks are active → 全部取消.
+    // The token makes a listener left over from a previous open a no-op.
     const winRef = win;
     win.addEventListener("beforeunload", () => {
-      if (this.win !== winRef) return;
+      if (this.openToken !== token || this.win !== winRef) return;
       this.win = null;
       if (this.tick !== null) { clearInterval(this.tick); this.tick = null; }
-      if (!this.detached) this.requestCancelAll();
+      if (!this.detached) {
+        qdbg("window closed by user while tasks active → requestCancelAll");
+        this.requestCancelAll();
+      }
     });
 
+    if (this.tick !== null) clearInterval(this.tick);
     this.tick = setInterval(() => this.renderTimers(), 1000) as unknown as number;
+
+    // Re-opened after a close: redraw the retained history.
+    if (this.order.length) {
+      qdbg(`re-opened with ${this.order.length} retained task(s)`);
+      this.renderTabs();
+      this.renderDetail();
+      this.renderButtons();
+    }
+    qdbg(`open: token=${token}`);
   }
 
   setOnCancelCurrent(cb: () => void): void { this.onCancelCurrentCb = cb; }
@@ -199,29 +226,36 @@ export class OcrQueueDialog {
     const w = this.win;
     this.win = null;
     try { w?.close(); } catch { /* already closed */ }
+    qdbg("close (detached)");
   }
 
   // ── task model ──────────────────────────────────────────────────────
 
   /** Register a job as a tab (queued). Called right after enqueue. */
   addTask(id: string, title: string): void {
-    if (this.tasks.has(id) || !this.win) return;
+    if (this.tasks.has(id)) return;
+    if (!this.win) {
+      qdbg(`addTask(${id}) skipped: no window`);
+      return;
+    }
     this.tasks.set(id, {
       title, status: "queued", percent: 0, message: "",
       totalStart: 0, ocrStart: null, totalEnd: null, ocrEnd: null,
     });
     this.order.push(id);
     if (!this.selectedId) this.selectedId = id;
-    this.renderTabs();
-    this.renderDetail();
-    this.renderButtons();
+    qdbg(`addTask(${id}) "${title}" — tasks=${this.tasks.size}`);
+    this.safeRender();
   }
 
   /** Job started running (JobManager onJobStarted). Auto-selects its tab. */
   markRunning(id: string, title: string): void {
     let t = this.tasks.get(id);
     if (!t) {
-      if (!this.win) return;
+      if (!this.win) {
+        qdbg(`markRunning(${id}) skipped: no window, no task`);
+        return;
+      }
       t = {
         title, status: "queued", percent: 0, message: "",
         totalStart: 0, ocrStart: null, totalEnd: null, ocrEnd: null,
@@ -237,9 +271,8 @@ export class OcrQueueDialog {
     t.message = "正在准备…";
     this.runningId = id;
     this.selectedId = id;
-    this.renderTabs();
-    this.renderDetail();
-    this.renderButtons();
+    qdbg(`markRunning(${id}) "${title}" — tasks=${this.tasks.size} order=${this.order.length}`);
+    this.safeRender();
   }
 
   /** Progress from the executor. percent < 0 updates the message only. */
@@ -249,13 +282,16 @@ export class OcrQueueDialog {
     if (percent >= 0) t.percent = Math.min(100, Math.max(0, percent));
     if (stage === "alloc" && t.ocrStart === null) t.ocrStart = Date.now();
     if (message) t.message = message;
-    if (id === this.selectedId) this.renderDetail();
+    if (id === this.selectedId) this.safeRenderDetail();
   }
 
   /** Terminal state. Idempotent — cancelCurrent emits before the executor's catch. */
   finishTask(id: string, status: "completed" | "failed" | "cancelled", message: string): void {
     const t = this.tasks.get(id);
-    if (!t) return;
+    if (!t) {
+      qdbg(`finishTask(${id}) ignored: unknown task`);
+      return;
+    }
     if (t.status === "completed" || t.status === "failed" || t.status === "cancelled") return;
     t.status = status;
     t.totalEnd = Date.now();
@@ -267,21 +303,29 @@ export class OcrQueueDialog {
       const nextId = this.order.find((k) => this.tasks.get(k)!.status === "running");
       if (nextId) { this.selectedId = nextId; this.runningId = nextId; }
     }
-    if (this.win) {
-      this.renderTabs();
-      this.renderDetail();
-      this.renderButtons();
-    }
+    qdbg(`finishTask(${id}) → ${status} — tasks=${this.tasks.size} order=${this.order.length}`);
+    if (this.win) this.safeRender();
   }
 
   selectTask(id: string): void {
     if (!this.tasks.has(id)) return;
     this.selectedId = id;
-    this.renderTabs();
-    this.renderDetail();
+    this.safeRender();
   }
 
   // ── rendering ───────────────────────────────────────────────────────
+
+  /** One failing render must not drop the others or kill the mutation. */
+  private safeRender(): void {
+    if (!this.win) return;
+    this.safeRenderDetail();
+    try { this.renderTabs(); } catch (err) { qdbg(`renderTabs failed: ${err}`); }
+    try { this.renderButtons(); } catch (err) { qdbg(`renderButtons failed: ${err}`); }
+  }
+
+  private safeRenderDetail(): void {
+    try { this.renderDetail(); } catch (err) { qdbg(`renderDetail failed: ${err}`); }
+  }
 
   private tabLabel(id: string): string {
     return `PDF${this.order.indexOf(id) + 1}`;
@@ -289,7 +333,16 @@ export class OcrQueueDialog {
 
   private renderTabs(): void {
     const host = this.win?.document.getElementById("task-tabs");
-    if (!host) return;
+    if (!host) {
+      qdbg("renderTabs: #task-tabs not found");
+      return;
+    }
+    if (this.order.length !== this.tasks.size) {
+      // Self-heal: Map preserves insertion order, so rebuilding is stable.
+      qdbg(`renderTabs: order(${this.order.length}) != tasks(${this.tasks.size}) — healing`);
+      this.order.length = 0;
+      for (const k of this.tasks.keys()) this.order.push(k);
+    }
     host.innerHTML = this.order.map((id) => {
       const t = this.tasks.get(id)!;
       const sel = id === this.selectedId ? " selected" : "";

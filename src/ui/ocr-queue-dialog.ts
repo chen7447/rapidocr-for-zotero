@@ -348,12 +348,17 @@ export class OcrQueueDialog {
   // ── card rendering (createElement only — innerHTML is a proven no-op here) ──
 
   /**
-   * 每秒对账自愈：任何任务没有卡片、或卡片挂在旧文档/已断连（环境可能导致
-   * append 后不显示），就地重建；然后重画全部状态。1 秒内收敛。
+   * 每秒对账自愈：
+   * 1) 任务没有卡片、或卡片挂在旧文档/已断连 → 就地重建；
+   * 2) 强制 DOM 卡片顺序 === 模型顺序（模型顺序 = 入队顺序，运行中的在前）——
+   *    补建的卡片总是追加到末尾，若创建时序出过岔子，这里把它搬回正确位置；
+   * 3) 重画全部状态。1 秒内收敛。
    */
   private reconcile(): void {
     const w = this.win;
     if (!w) return;
+    const list = w.document.getElementById("task-list");
+    if (!list) return;
     let rebuilt = 0;
     for (const id of [...this.order]) {
       const t = this.tasks.get(id);
@@ -365,10 +370,18 @@ export class OcrQueueDialog {
         t.refs = null;
         this.buildCard(id);
         rebuilt++;
-      } else {
-        this.paint(t);
       }
     }
+    let prev: Element | null = null;
+    for (const id of this.order) {
+      const node = this.tasks.get(id)?.refs?.root;
+      if (!node) continue;
+      if (node.previousElementSibling !== prev) {
+        list.insertBefore(node, prev ? prev.nextSibling : list.firstElementChild);
+      }
+      prev = node;
+    }
+    for (const t of this.tasks.values()) this.paint(t);
     if (rebuilt) qdbg(`reconcile rebuilt ${rebuilt} card(s) — tasks=${this.tasks.size}`);
   }
 

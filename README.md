@@ -4,7 +4,7 @@
 
 **开装即用。** 不装 Python，不装 Tesseract，不装 OCRmyPDF，不配环境变量。下载 `.xpi` → 拖进 Zotero → 右键 **OCR PDF**。模型和引擎都打在插件里。
 
-当前版本：`1.9.1`  
+当前版本：`1.9.2`  
 支持：Zotero **9.0 – 10.0.\***
 
 ---
@@ -28,7 +28,7 @@
 1. 打开 [Releases](https://github.com/chen7447/rapidocr-for-zotero/releases)，下载最新 `.xpi`，例如：
 
    ```text
-   pdf-ocr-for-zotero-1.9.1.xpi
+   pdf-ocr-for-zotero-1.9.2.xpi
    ```
 
 2. Zotero → **工具 → 插件**

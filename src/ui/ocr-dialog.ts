@@ -74,7 +74,7 @@ const DIALOG_HTML = `<!DOCTYPE html>
 </html>`;
 
 /** "8 s" / "3 min 12 s" / "1 h 5 min 3 s" */
-function formatElapsed(ms: number): string {
+export function formatElapsed(ms: number): string {
   const s = Math.max(0, Math.floor(ms / 1000));
   const h = Math.floor(s / 3600);
   const m = Math.floor((s % 3600) / 60);

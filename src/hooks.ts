@@ -1,6 +1,7 @@
 import { ContextMenuController, MenuManagerLike } from "./ui/context-menu";
 import { JobManager } from "./jobs/job-manager";
 import { OcrProgressDialog } from "./ui/ocr-dialog";
+import { OcrQueueDialog } from "./ui/ocr-queue-dialog";
 import { registerPrefs, unregisterPrefs, PreferencePanesLike } from "./ui/preferences";
 import {
   SelectionItem,
@@ -17,6 +18,7 @@ const initializedWindows = new WeakSet<Window>();
 let contextMenuController: ContextMenuController | null = null;
 let jobManager: JobManager | null = null;
 let ocrDialog: OcrProgressDialog | null = null;
+let queueDialog: OcrQueueDialog | null = null;
 let activeEngine: { cancel(): void } | null = null;
 let prefsRegistered = false;
 
@@ -128,14 +130,40 @@ function confirmCreateParent(title: string): boolean {
 
 // ─── Job manager ───
 
+/**
+ * 队列进度窗：整个 JobManager 生命周期共用一个窗口，任务以标签页呈现。
+ * 用户手关窗口 = 全部取消（沿用旧单任务窗语义）。
+ */
+function ensureQueueDialog(): OcrQueueDialog {
+  if (!queueDialog || queueDialog.isClosed()) {
+    queueDialog = new OcrQueueDialog();
+    queueDialog.open();
+    queueDialog.setOnCancelCurrent(() => jobManager?.cancelCurrent());
+    queueDialog.setOnCancelAll(() => {
+      jobManager?.cancelCurrent();
+      jobManager?.cancelRemaining();
+    });
+  }
+  return queueDialog;
+}
+
+/** 入队即出标签：批量选择时 PDF1..N 立刻出现在进度窗（等待中）。 */
+function registerQueuedJobTab(job: Job): void {
+  try {
+    ensureQueueDialog().addTask(job.jobId, job.title);
+  } catch (err) {
+    log(`queue dialog open failed: ${err instanceof Error ? err.message : String(err)}`);
+  }
+}
+
 function ensureJobManager(): JobManager {
   if (!jobManager) {
     jobManager = new JobManager({
       async execute(job) {
-        if (ocrDialog) { ocrDialog.close(); ocrDialog = null; }
-        ocrDialog = new OcrProgressDialog();
-        ocrDialog.open(job.title);
-        ocrDialog.setOnCancel(() => jobManager?.cancelCurrent());
+        const dlg = queueDialog;
+        // 取消不再轮询对话框窗口——JobManager 的任务状态是唯一事实来源
+        //（cancelCurrent 先置 cancelled 再 kill，引擎每步都能看到）
+        const jobCancelled = () => jobManager?.get(job.jobId)?.status === "cancelled";
 
         try {
           if (job.inPlace) {
@@ -143,18 +171,18 @@ function ensureJobManager(): JobManager {
             if (job.writeAttachmentID && job.writeAttachmentID !== job.attachmentID) {
               closeIDs.push(job.writeAttachmentID);
             }
-            ocrDialog.updateProgress(0, "v3", "关闭阅读器…");
+            dlg?.updateTask(job.jobId, 0, "v3", "关闭阅读器…");
             for (const id of closeIDs) closeReadersFor(id);
             for (const id of closeIDs) await waitReadersClosed(id);
             await sleep(200);
           }
 
           // 1. Load PDF via Zotero's built-in pdf.js (解析约几十毫秒)
-          ocrDialog.updateProgress(0, "v3", "解析 PDF…");
+          dlg?.updateTask(job.jobId, 0, "v3", "解析 PDF…");
           const { ZoteroPageRenderer } = await import("./ocr/zotero-renderer");
           const renderer = new ZoteroPageRenderer();
           await renderer.load(job.path);
-          if (ocrDialog.isCancelled) throw new Error("OCR cancelled");
+          if (jobCancelled()) throw new Error("OCR cancelled");
 
           const prefs = readOcrPrefs();
           const detLimitSideLen = job.detLimitSideLen ?? prefs.detLimitSideLen;
@@ -165,7 +193,7 @@ function ensureJobManager(): JobManager {
           const ocrWorkers = job.ocrWorkers ?? prefs.ocrWorkers;
           const autoOpen = prefs.autoOpen;
 
-          ocrDialog.updateProgress(0, "v3", "OCR 处理中…");
+          dlg?.updateTask(job.jobId, 0, "v3", "OCR 处理中…");
           const { OcrEngine } = await import("./ocr/ocr-engine");
           const engine = new OcrEngine(renderer, {
             detLimitSideLen,
@@ -175,8 +203,8 @@ function ensureJobManager(): JobManager {
             cropMode,
             workers: ocrWorkers,
             pageIndexes: job.pageIndexes,
-            isCancelled: () => ocrDialog?.isCancelled ?? false,
-            onProgress: (info) => ocrDialog?.updateProgress(Math.round(info.percent), info.stage, info.message),
+            isCancelled: jobCancelled,
+            onProgress: (info) => queueDialog?.updateTask(job.jobId, Math.round(info.percent), info.stage, info.message),
           });
           activeEngine = engine;
           let result;
@@ -188,7 +216,7 @@ function ensureJobManager(): JobManager {
           }
           log(`job ${job.jobId} — OCR done: ${result.pages.length} pages`);
 
-          ocrDialog.updateProgress(90, "v3", "重建 PDF…");
+          dlg?.updateTask(job.jobId, 90, "v3", "重建 PDF…");
 
           // 3. Build searchable PDF with invisible text layer
           const { addOcrLayerToPdf } = await import("./ocr/pdf-builder");
@@ -203,7 +231,7 @@ function ensureJobManager(): JobManager {
             await writePdf(overlayPath, outputPdf);
             const indexedID = job.writeAttachmentID ?? job.attachmentID;
             await Zotero.Fulltext.indexItems([indexedID], { complete: true, ignoreErrors: false });
-            ocrDialog.complete(`OCR 完成 — ${result.pages.reduce((s, p) => s + p.boxes.length, 0)} 个文本框`);
+            dlg?.finishTask(job.jobId, "completed", `OCR 完成 — ${result.pages.reduce((s, p) => s + p.boxes.length, 0)} 个文本框`);
             try { await reopenAttachment(indexedID, job.pageIndexes?.[0]); }
             catch (openErr) { log(`reopen after page OCR: ${openErr instanceof Error ? openErr.message : String(openErr)}`); }
             return;
@@ -276,7 +304,7 @@ function ensureJobManager(): JobManager {
             }
           }
 
-          ocrDialog.complete(`OCR 完成 — ${result.pages.reduce((s, p) => s + p.boxes.length, 0)} 个文本框`);
+          dlg?.finishTask(job.jobId, "completed", `OCR 完成 — ${result.pages.reduce((s, p) => s + p.boxes.length, 0)} 个文本框`);
 
           // 完成后自动打开 [OCR] 附件（偏好开关，默认关闭）
           if (autoOpen && ocrAttachmentID) {
@@ -291,15 +319,30 @@ function ensureJobManager(): JobManager {
           const msg = err instanceof Error ? err.message : String(err);
           if (msg === "OCR cancelled") {
             log(`job ${job.jobId} — cancelled`);
+            queueDialog?.finishTask(job.jobId, "cancelled", "已取消");
           } else {
             log(`job ${job.jobId} — FAILED: ${msg}`);
-            ocrDialog.fail(msg);
+            queueDialog?.finishTask(job.jobId, "failed", msg);
           }
           throw err;
         }
       },
       kill() {
         activeEngine?.cancel();
+      },
+    });
+    // JobManager 事件 → 队列窗。onJobStarted 负责把标签切到运行态；
+    // 被「全部取消」干掉的排队任务不会进入 execute，只能从这里收尾。
+    jobManager.addListener({
+      onJobStarted: (started) => {
+        try { ensureQueueDialog().markRunning(started.jobId, started.title); }
+        catch (err) { log(`queue dialog open failed: ${err instanceof Error ? err.message : String(err)}`); }
+      },
+      onJobProgress: () => {},
+      onJobCompleted: () => {},
+      onJobFailed: () => {},
+      onJobCancelled: (cancelledJob) => {
+        queueDialog?.finishTask(cancelledJob.jobId, "cancelled", "已取消");
       },
     });
   }
@@ -345,8 +388,10 @@ async function handleSelection(resolution: SelectionResolution): Promise<void> {
   // 让 forEach 中途炸断，静默丢掉剩余任务
   let skipped = 0;
   resolution.jobs.forEach((job, index) => {
+    const queued = createJob(index, job.attachment, job.path, settings);
     try {
-      manager.enqueue(createJob(index, job.attachment, job.path, settings));
+      manager.enqueue(queued);
+      registerQueuedJobTab(queued);
     } catch {
       skipped++;
     }
@@ -402,7 +447,9 @@ async function handlePageOcr(req: PageOcrRequest): Promise<void> {
     }
   }
   try {
-    ensureJobManager().enqueue(createJob(0, renderItem, renderPath, extra));
+    const queued = createJob(0, renderItem, renderPath, extra);
+    ensureJobManager().enqueue(queued);
+    registerQueuedJobTab(queued);
   } catch (err) {
     log(`page OCR enqueue failed: ${err instanceof Error ? err.message : String(err)}`);
   }
@@ -477,6 +524,12 @@ async function handleStripOcr(req: StripRequest): Promise<void> {
   closeReadersFor(req.itemID);
   if (ocrItem.id !== req.itemID) closeReadersFor(ocrItem.id);
 
+  // 队列窗：显式取消进行中/排队的 OCR 任务（沿用旧"关窗即取消"语义），再关窗
+  if (queueDialog) {
+    queueDialog.requestCancelAll();
+    queueDialog.close();
+    queueDialog = null;
+  }
   if (ocrDialog) { ocrDialog.close(); ocrDialog = null; }
   ocrDialog = new OcrProgressDialog();
   ocrDialog.open(ocrItem.getDisplayTitle?.() || "", "删除 OCR 文字层");
@@ -578,6 +631,8 @@ async function onShutdown(): Promise<void> {
   jobManager?.shutdown();
   jobManager = null;
   if (ocrDialog) { ocrDialog.close(); ocrDialog = null; }
+  queueDialog?.close();
+  queueDialog = null;
   if (contextMenuController) {
     try { contextMenuController.unregister(); } catch { /* best-effort */ }
     contextMenuController = null;

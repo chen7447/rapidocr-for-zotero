@@ -7,3 +7,5 @@ pref("extensions.zotero.pdfocrforzotero.detBoxThresh", 40);
 pref("extensions.zotero.pdfocrforzotero.detMaxRotDeg", 30);
 pref("extensions.zotero.pdfocrforzotero.cropMode", 2);
 pref("extensions.zotero.pdfocrforzotero.autoOpenAfterSuccess", false);
+// 逐句渲染排查日志（zotero-renderer）——默认关，排障时打开
+pref("extensions.zotero.pdfocrforzotero.debug", false);

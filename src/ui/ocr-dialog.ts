@@ -11,7 +11,10 @@
  * popup-blocker behavior that would silently prevent the window.
  */
 
-const DIALOG_HTML = `<!DOCTYPE html>
+import { t } from "../locale";
+
+/** Re-evaluated per open() so a locale change is picked up. */
+const dialogHtml = () => `<!DOCTYPE html>
 <html>
 <head>
 <meta charset="utf-8">
@@ -58,17 +61,17 @@ const DIALOG_HTML = `<!DOCTYPE html>
 </style>
 </head>
 <body>
-  <h1 id="dialog-title">Create Searchable PDF</h1>
+  <h1 id="dialog-title">${t("strip.title")}</h1>
   <div id="file-name"></div>
   <progress id="progress-bar" value="0" max="100"></progress>
   <div id="progress-text">0%</div>
-  <div id="command-text">正在初始化...</div>
-  <div id="timer-total" class="timer-line">总用时 <span id="timer-total-val">0 s</span></div>
-  <div id="timer-ocr" class="timer-line">RapidOCR 已运行 <span id="timer-ocr-val">0 s</span></div>
+  <div id="command-text">${t("progress.initializing")}</div>
+  <div id="timer-total" class="timer-line">${t("progress.totalTime")} <span id="timer-total-val">0 s</span></div>
+  <div id="timer-ocr" class="timer-line">${t("progress.ocrTime")} <span id="timer-ocr-val">0 s</span></div>
   <div id="status-text"></div>
   <div id="actions">
-    <button id="cancel-btn" class="primary">取消</button>
-    <button id="close-btn" class="hidden">关闭</button>
+    <button id="cancel-btn" class="primary">${t("common.cancel")}</button>
+    <button id="close-btn" class="hidden">${t("common.close")}</button>
   </div>
 </body>
 </html>`;
@@ -120,7 +123,7 @@ export class OcrProgressDialog {
     }
 
     win.document.open();
-    win.document.write(DIALOG_HTML);
+    win.document.write(dialogHtml());
     win.document.close();
 
     const titleEl = win.document.getElementById("dialog-title");
@@ -194,7 +197,7 @@ export class OcrProgressDialog {
     if (bar) bar.value = 100;
     if (pct) pct.textContent = "100%";
     if (cmd) cmd.textContent = message;
-    if (status) { status.textContent = "✓ 完成"; status.className = "success"; }
+    if (status) { status.textContent = t("status.completed"); status.className = "success"; }
     if (cancelBtn) cancelBtn.classList.add("hidden");
     if (closeBtn) closeBtn.classList.remove("hidden");
   }
@@ -209,7 +212,7 @@ export class OcrProgressDialog {
     const cancelBtn = w.document.getElementById("cancel-btn");
     const closeBtn = w.document.getElementById("close-btn") as HTMLButtonElement | null;
     if (cmd) cmd.textContent = message;
-    if (status) { status.textContent = "✗ 失败"; status.className = "error"; }
+    if (status) { status.textContent = t("status.failed"); status.className = "error"; }
     if (cancelBtn) cancelBtn.classList.add("hidden");
     if (closeBtn) closeBtn.classList.remove("hidden");
   }
@@ -240,7 +243,7 @@ export class OcrProgressDialog {
     const status = w.document.getElementById("status-text");
     const cancelBtn = w.document.getElementById("cancel-btn");
     const closeBtn = w.document.getElementById("close-btn") as HTMLButtonElement | null;
-    if (status) { status.textContent = "已取消"; status.className = ""; }
+    if (status) { status.textContent = t("status.cancelledShort"); status.className = ""; }
     if (cancelBtn) cancelBtn.classList.add("hidden");
     if (closeBtn) closeBtn.classList.remove("hidden");
   }

@@ -1,5 +1,6 @@
 import { PLUGIN_ID } from "./context-menu";
 import { parsePageSpec } from "../ocr/page-spec";
+import { t } from "../locale";
 
 export type PageOcrRequest = {
   itemID: number;
@@ -40,7 +41,6 @@ type ReaderLike = {
 const BTN_ID = "pdfocr-toolbar-btn";
 const POP_ID = "pdfocr-toolbar-pop";
 const PLACEHOLDER = 32;
-const STRIP_TIP = "删除当前页的 OCR 文字层（可从原件恢复）";
 
 let onSubmit: ((req: PageOcrRequest) => void) | null = null;
 let onStrip: ((req: StripRequest) => void) | null = null;
@@ -62,8 +62,8 @@ function onRenderToolbar(event: {
   btn.id = BTN_ID;
   btn.type = "button";
   btn.className = "toolbar-button";
-  btn.title = "OCR 当前页（已有 OCR 文字层会被自动替换）";
-  btn.setAttribute("aria-label", "OCR 当前页");
+  btn.title = t("toolbar.pageOcr");
+  btn.setAttribute("aria-label", t("toolbar.pageOcr"));
   // 图标用 data URI 内联 SVG + currentColor：pdf.js iframe 沙箱内
   // chrome:// 与 context-fill 均无法解析，data URI 最可靠且跟随主题色。
   // 复用插件同一份 pdf-ocr.svg 的路径，仅把 context-fill 换成 currentColor。
@@ -154,42 +154,42 @@ function togglePop(doc: Document, reader: ReaderLike, btn: HTMLElement): void {
     "box-shadow:0 8px 24px rgba(0,0,0,.4)",
   ].join(";");
   pop.innerHTML = `
-    <label style="display:block;margin-bottom:8px">页码
+    <label style="display:block;margin-bottom:8px">${t("toolbar.pages")}
       <input id="pdfocr-pages" type="text" style="width:100%;margin-top:2px;box-sizing:border-box"
-        value="${currentPage(reader)}" placeholder="3 或 3,5,7-9">
+        value="${currentPage(reader)}" placeholder="${t("toolbar.pagesHint")}">
     </label>
-    <label style="display:block;margin-bottom:6px">检测分辨率
+    <label style="display:block;margin-bottom:6px">${t("toolbar.res")}
       <select id="pdfocr-limit" style="width:100%;margin-top:2px">
         ${[512, 768, 960, 1024, 1280, 1366, 1536, 1920].map((n) =>
-          `<option value="${n}"${n === p.detLimitSideLen ? " selected" : ""}>${n}${n === 1536 ? "（推荐）" : ""}${n === 1920 ? "（大版面/扫描件）" : ""}</option>`,
+          `<option value="${n}"${n === p.detLimitSideLen ? " selected" : ""}>${n}${n === 1536 ? t("toolbar.recommended") : ""}${n === 1920 ? t("toolbar.largeScan") : ""}</option>`,
         ).join("")}
       </select>
     </label>
-    <label style="display:block;margin-bottom:6px">检测灵敏度
+    <label style="display:block;margin-bottom:6px">${t("toolbar.thresh")}
       <input id="pdfocr-thresh" type="number" min="0" max="1" step="0.05" style="width:100%;margin-top:2px;box-sizing:border-box" value="${p.detThresh}">
     </label>
-    <label style="display:block;margin-bottom:6px">文本框过滤
+    <label style="display:block;margin-bottom:6px">${t("toolbar.box")}
       <input id="pdfocr-box" type="number" min="0" max="1" step="0.05" style="width:100%;margin-top:2px;box-sizing:border-box" value="${p.detBoxThresh}">
     </label>
-    <label style="display:block;margin-bottom:10px">倾斜过滤（度）
+    <label style="display:block;margin-bottom:10px">${t("toolbar.tilt")}
       <input id="pdfocr-maxrot" type="number" min="0" max="90" step="5" style="width:100%;margin-top:2px;box-sizing:border-box" value="${p.detMaxRotDeg}">
     </label>
-    <label style="display:block;margin-bottom:10px">识别模式
+    <label style="display:block;margin-bottom:10px">${t("toolbar.crop")}
       <select id="pdfocr-cropmode" style="width:100%;margin-top:2px">
-        <option value="0"${p.cropMode === 0 ? " selected" : ""}>直立正文（AABB 直接裁剪）</option>
-        <option value="1"${p.cropMode === 1 ? " selected" : ""}>倾斜正文（旋转矫正）</option>
-        <option value="2"${p.cropMode === 2 ? " selected" : ""}>复合方法（推荐）</option>
+        <option value="0"${p.cropMode === 0 ? " selected" : ""}>${t("toolbar.crop0")}</option>
+        <option value="1"${p.cropMode === 1 ? " selected" : ""}>${t("toolbar.crop1")}</option>
+        <option value="2"${p.cropMode === 2 ? " selected" : ""}>${t("toolbar.crop2")}</option>
       </select>
     </label>
-    <label style="display:block;margin-bottom:10px">并行核心数
+    <label style="display:block;margin-bottom:10px">${t("toolbar.workers")}
       <select id="pdfocr-workers" style="width:100%;margin-top:2px">
         ${[1, 2, 3, 4, 5, 6, 7, 8].map((n) =>
-          `<option value="${n}"${n === p.ocrWorkers ? " selected" : ""}>${n} 核${n === 4 ? "（推荐）" : ""}</option>`,
+          `<option value="${n}"${n === p.ocrWorkers ? " selected" : ""}>${n} ${t("toolbar.coresUnit")}${n === 4 ? t("toolbar.recommended") : ""}</option>`,
         ).join("")}
       </select>
     </label>
     <button id="pdfocr-go" type="button" style="width:100%;padding:6px 0;border:0;border-radius:6px;background:#89b4fa;color:#1e1e2e;font-weight:600;cursor:pointer">OCR</button>
-    <button id="pdfocr-strip" type="button" title="${STRIP_TIP}" style="width:100%;margin-top:6px;padding:6px 0;border:1px solid #45475a;border-radius:6px;background:#313244;color:#cdd6f4;cursor:pointer">删除 OCR 文字层</button>
+    <button id="pdfocr-strip" type="button" title="${t("toolbar.stripTip")}" style="width:100%;margin-top:6px;padding:6px 0;border:1px solid #45475a;border-radius:6px;background:#313244;color:#cdd6f4;cursor:pointer">${t("toolbar.strip")}</button>
     <div id="pdfocr-err" style="color:#f38ba8;margin-top:6px;min-height:1em"></div>
   `;
   const host = doc.body ?? doc.documentElement;
@@ -210,11 +210,11 @@ function togglePop(doc: Document, reader: ReaderLike, btn: HTMLElement): void {
     const pages1 = parsePageSpec(spec, n, currentPage(reader));
     const err = pop.querySelector("#pdfocr-err") as HTMLElement;
     if (!pages1.length) {
-      err.textContent = n > 0 ? "页码无效" : "无法读取页数";
+      err.textContent = n > 0 ? t("toolbar.errPages") : t("toolbar.errCount");
       return null;
     }
     if (!reader.itemID) {
-      err.textContent = "无法确定当前附件";
+      err.textContent = t("toolbar.errItem");
       return null;
     }
     return pages1;

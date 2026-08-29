@@ -10,6 +10,8 @@
  * window, so resolution / crop-mode are radio groups (native inputs, reliable).
  */
 
+import { t } from "../locale";
+
 export type OcrRunSettings = {
   detLimitSideLen: number;
   detThresh: number; // 0~1
@@ -19,7 +21,8 @@ export type OcrRunSettings = {
   ocrWorkers: number;
 };
 
-const SETTINGS_HTML = `<!DOCTYPE html>
+/** Re-evaluated per open() so a locale change is picked up. */
+const settingsHtml = () => `<!DOCTYPE html>
 <html>
 <head>
 <meta charset="utf-8">
@@ -52,10 +55,10 @@ const SETTINGS_HTML = `<!DOCTYPE html>
 </style>
 </head>
 <body>
-  <h1>OCR PDF 设置</h1>
+  <h1>${t("settings.title")}</h1>
   <div id="file-label"></div>
   <div class="row">
-    <span class="lbl">检测分辨率</span>
+    <span class="lbl">${t("settings.res")}</span>
     <div class="radios" id="s-limit">
       <label><input type="radio" name="s-limit" value="512">512</label>
       <label><input type="radio" name="s-limit" value="768">768</label>
@@ -63,25 +66,25 @@ const SETTINGS_HTML = `<!DOCTYPE html>
       <label><input type="radio" name="s-limit" value="1024">1024</label>
       <label><input type="radio" name="s-limit" value="1280">1280</label>
       <label><input type="radio" name="s-limit" value="1366">1366</label>
-      <label><input type="radio" name="s-limit" value="1536">1536（推荐）</label>
+      <label><input type="radio" name="s-limit" value="1536">1536${t("toolbar.recommended")}</label>
       <label><input type="radio" name="s-limit" value="1920">1920</label>
     </div>
   </div>
-  <div class="row"><span class="lbl">检测灵敏度</span><input type="number" id="s-thresh" min="0" max="1" step="0.05"/></div>
-  <div class="row"><span class="lbl">文本框过滤</span><input type="number" id="s-box" min="0" max="1" step="0.05"/></div>
-  <div class="row"><span class="lbl">倾斜文字过滤</span><input type="number" id="s-maxrot" min="0" max="90" step="5"/></div>
+  <div class="row"><span class="lbl">${t("settings.thresh")}</span><input type="number" id="s-thresh" min="0" max="1" step="0.05"/></div>
+  <div class="row"><span class="lbl">${t("settings.box")}</span><input type="number" id="s-box" min="0" max="1" step="0.05"/></div>
+  <div class="row"><span class="lbl">${t("settings.tilt")}</span><input type="number" id="s-maxrot" min="0" max="90" step="5"/></div>
   <div class="row">
-    <span class="lbl">识别模式</span>
+    <span class="lbl">${t("settings.crop")}</span>
     <div class="radios" id="s-crop">
-      <label><input type="radio" name="s-crop" value="0">直立正文</label>
-      <label><input type="radio" name="s-crop" value="1">倾斜正文</label>
-      <label><input type="radio" name="s-crop" value="2">复合（推荐）</label>
+      <label><input type="radio" name="s-crop" value="0">${t("settings.crop0")}</label>
+      <label><input type="radio" name="s-crop" value="1">${t("settings.crop1")}</label>
+      <label><input type="radio" name="s-crop" value="2">${t("settings.crop2")}</label>
     </div>
   </div>
-  <div class="row"><span class="lbl">并行核心数</span><input type="number" id="s-workers" min="1" max="8" step="1"/></div>
+  <div class="row"><span class="lbl">${t("settings.workers")}</span><input type="number" id="s-workers" min="1" max="8" step="1"/></div>
   <div id="actions">
-    <button id="s-cancel">取消</button>
-    <button id="s-run" class="primary">运行</button>
+    <button id="s-cancel">${t("common.cancel")}</button>
+    <button id="s-run" class="primary">${t("settings.run")}</button>
   </div>
 </body>
 </html>`;
@@ -115,7 +118,7 @@ export function showOcrSettingsDialog(
     }
 
     win.document.open();
-    win.document.write(SETTINGS_HTML);
+    win.document.write(settingsHtml());
     win.document.close();
     win.focus();
 

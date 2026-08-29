@@ -23,6 +23,7 @@
  */
 
 import { formatElapsed } from "./ocr-dialog";
+import { t } from "../locale";
 
 function qdbg(msg: string): void {
   try {
@@ -69,15 +70,16 @@ const STATUS_GLYPH: Record<TaskStatus, string> = {
   cancelled: "⊘",
 };
 
-const STATUS_TEXT: Record<TaskStatus, string> = {
-  queued: "等待",
-  running: "运行中",
-  completed: "完成",
-  failed: "失败",
-  cancelled: "已取消",
+const STATUS_KEY: Record<TaskStatus, string> = {
+  queued: "status.queued",
+  running: "status.running",
+  completed: "status.completed",
+  failed: "status.failed",
+  cancelled: "status.cancelled",
 };
 
-const QUEUE_HTML = `<!DOCTYPE html>
+/** HTML template re-evaluated per open() so a locale change is picked up. */
+const queueHtml = () => `<!DOCTYPE html>
 <html>
 <head>
 <meta charset="utf-8">
@@ -149,8 +151,8 @@ const QUEUE_HTML = `<!DOCTYPE html>
   <h1>RapidOCR for Zotero</h1>
   <div id="task-list"></div>
   <div id="actions">
-    <button id="cancel-all-btn">全部取消</button>
-    <button id="close-btn" class="hidden">关闭</button>
+    <button id="cancel-all-btn">${t("queue.cancelAll")}</button>
+    <button id="close-btn" class="hidden">${t("common.close")}</button>
   </div>
 </body>
 </html>`;
@@ -183,7 +185,7 @@ export class OcrQueueDialog {
     if (!win) throw new Error("无法打开 OCR 队列窗口");
 
     win.document.open();
-    win.document.write(QUEUE_HTML);
+    win.document.write(queueHtml());
     win.document.close();
     this.win = win;
     this.detached = false;
@@ -266,40 +268,40 @@ export class OcrQueueDialog {
 
   /** Job started running (JobManager onJobStarted). */
   markRunning(id: string, title: string): void {
-    let t = this.tasks.get(id);
-    if (!t) {
+    let task = this.tasks.get(id);
+    if (!task) {
       if (!this.win) {
         qdbg(`markRunning(${id}) skipped: no window, no task`);
         return;
       }
-      t = {
+      task = {
         title, status: "queued", percent: 0, message: "",
         totalStart: 0, ocrStart: null, totalEnd: null, ocrEnd: null,
         refs: null,
       };
-      this.tasks.set(id, t);
+      this.tasks.set(id, task);
       this.order.push(id);
     }
     // 新一批开始时清掉上一批的遗留卡片：没有其他进行中/排队任务，
     // 而窗口里还挂着已终态的旧卡片 → 全部移除（用户要求不保留旧卡）
     const othersActive = [...this.tasks.values()].some(
-      (x) => x !== t && (x.status === "queued" || x.status === "running"),
+      (x) => x !== task && (x.status === "queued" || x.status === "running"),
     );
     if (!othersActive) {
       for (const k of [...this.order]) {
         const x = this.tasks.get(k);
-        if (x && x !== t && x.status !== "queued" && x.status !== "running") this.removeTask(k);
+        if (x && x !== task && x.status !== "queued" && x.status !== "running") this.removeTask(k);
       }
     }
-    t.status = "running";
-    t.totalStart = Date.now();
-    t.ocrStart = null;
-    t.totalEnd = null;
-    t.ocrEnd = null;
-    t.message = "正在准备…";
+    task.status = "running";
+    task.totalStart = Date.now();
+    task.ocrStart = null;
+    task.totalEnd = null;
+    task.ocrEnd = null;
+    task.message = t("queue.preparing");
     this.runningId = id;
     qdbg(`markRunning(${id}) "${title}" — tasks=${this.tasks.size}`);
-    this.paint(t);
+    this.paint(task);
     this.renderButtons();
   }
 
@@ -416,18 +418,18 @@ export class OcrQueueDialog {
 
   private buildCard(id: string): void {
     const w = this.win;
-    const t = this.tasks.get(id);
-    if (!w || !t || t.refs) return;
+    const task = this.tasks.get(id);
+    if (!w || !task || task.refs) return;
     const list = w.document.getElementById("task-list");
     if (!list) {
       qdbg(`buildCard(${id}): #task-list not found`);
       return;
     }
-    const root = this.el("div", `ocr-card st-${t.status}`, list);
+    const root = this.el("div", `ocr-card st-${task.status}`, list);
     const head = this.el("div", "ocr-head", root);
     const name = this.el("span", "ocr-name", head);
-    name.textContent = t.title;
-    name.title = t.title;
+    name.textContent = task.title;
+    name.title = task.title;
     const state = this.el("span", "ocr-state", head);
     const bar = this.el("progress", "", root) as HTMLProgressElement;
     bar.max = 100;
@@ -435,51 +437,51 @@ export class OcrQueueDialog {
     const msg = this.el("span", "ocr-msg", row);
     const pct = this.el("span", "ocr-pct", row);
     const timers = this.el("div", "ocr-timers", root);
-    timers.append("总用时 ");
+    timers.append(`${t("progress.totalTime")} `);
     const total = this.el("span", "", timers);
-    timers.append(" · RapidOCR ");
+    timers.append(` · ${t("progress.ocrTime")} `);
     const ocr = this.el("span", "", timers);
     const foot = this.el("div", "ocr-foot", root);
     const cancel = this.el("button", "ocr-cancel", foot) as HTMLButtonElement;
     cancel.type = "button";
-    cancel.textContent = "取消";
+    cancel.textContent = t("queue.cancel");
     cancel.addEventListener("click", (ev: Event) => {
       ev.preventDefault();
       this.onCancelTaskCb?.(id);
     });
 
-    t.refs = { root, state, bar, msg, pct, total, ocr, cancel };
-    this.paint(t);
+    task.refs = { root, state, bar, msg, pct, total, ocr, cancel };
+    this.paint(task);
   }
 
   /** Push one task's state into its card. */
-  private paint(t: QueueTask): void {
-    const r = t.refs;
+  private paint(task: QueueTask): void {
+    const r = task.refs;
     if (!r) return;
-    r.root.className = `ocr-card st-${t.status}`;
-    r.state.textContent = `${STATUS_GLYPH[t.status]} ${STATUS_TEXT[t.status]}`;
-    r.state.className = `ocr-state st-${t.status}`;
-    if (t.status === "queued") {
+    r.root.className = `ocr-card st-${task.status}`;
+    r.state.textContent = `${STATUS_GLYPH[task.status]} ${t(STATUS_KEY[task.status])}`;
+    r.state.className = `ocr-state st-${task.status}`;
+    if (task.status === "queued") {
       r.bar.value = 0;
       r.pct.textContent = "0%";
       const running = this.runningId ? this.tasks.get(this.runningId) : undefined;
       r.msg.textContent = running && running.status === "running"
-        ? `等待中…（等待《${running.title}》完成）`
-        : "等待中…";
-    } else if (t.status === "running") {
-      r.bar.value = t.percent;
-      r.pct.textContent = `${Math.round(t.percent)}%`;
-      r.msg.textContent = t.message || "处理中…";
+        ? t("queue.waitingFor", { name: running.title })
+        : t("queue.waiting");
+    } else if (task.status === "running") {
+      r.bar.value = task.percent;
+      r.pct.textContent = `${Math.round(task.percent)}%`;
+      r.msg.textContent = task.message || t("queue.processing");
     } else {
-      if (t.status === "completed") {
+      if (task.status === "completed") {
         r.bar.value = 100;
         r.pct.textContent = "100%";
       }
-      r.msg.textContent = t.message;
+      r.msg.textContent = task.message;
     }
     // 终态卡片不再提供取消入口
-    r.cancel.classList.toggle("hidden", t.status !== "queued" && t.status !== "running");
-    this.paintTimers(t);
+    r.cancel.classList.toggle("hidden", task.status !== "queued" && task.status !== "running");
+    this.paintTimers(task);
   }
 
   private paintTimers(t: QueueTask): void {

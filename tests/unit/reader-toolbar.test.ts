@@ -21,7 +21,7 @@ test("strip OCR closes reader, shows progress, then reopens", () => {
     join(dirname(fileURLToPath(import.meta.url)), "../../src/hooks.ts"),
     "utf8",
   );
-  assert.match(hooks, /ocrDialog\.open\(ocrItem\.getDisplayTitle\?\.\(\) \|\| "", "删除 OCR 文字层"\)/);
+  assert.match(hooks, /ocrDialog\.open\(ocrItem\.getDisplayTitle\?\.\(\) \|\| "", t\("strip\.title"\)\)/);
   assert.match(hooks, /await waitReadersClosed/);
   assert.match(hooks, /await writePdf\(ocrPath, bytes\)/);
   assert.match(hooks, /reopen after strip/);

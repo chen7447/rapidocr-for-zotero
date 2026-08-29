@@ -11,6 +11,7 @@
 import { fetchModelAssets } from "./models";
 import { WorkerClient } from "./worker-client";
 import { OCRResult, OCRPageResult, PageRenderer, OCRBox } from "./types";
+import { t } from "../locale";
 
 export interface OcrProgressSink {
   (info: { stage: string; percent: number; message?: string }): void;
@@ -73,9 +74,9 @@ export class OcrEngine {
 
     if (!this.cancelled()) {
       // 前置阶段：先报页数与核数分配，再进逐页进度。计时器(1) 从 alloc 起算。
-      onProgress?.({ stage: "parse", percent: 0, message: `解析PDF页数为 ${pageCount} 页` });
+      onProgress?.({ stage: "parse", percent: 0, message: t("engine.pages", { n: pageCount }) });
       if (!singlePage) {
-        onProgress?.({ stage: "alloc", percent: 0, message: `已分配 ${n} 核数，每核OCR数为 ${Math.ceil(indexes.length / n)}（向上取整）` });
+        onProgress?.({ stage: "alloc", percent: 0, message: t("engine.allocPages", { n, k: Math.ceil(indexes.length / n) }) });
       }
     }
 
@@ -130,7 +131,7 @@ export class OcrEngine {
     const img = await this.renderer.renderPage(pageIndex);
     if (this.cancelled()) throw new Error("OCR cancelled");
 
-    onProgress?.({ stage: "det", percent: 0, message: "整页检测文本框…" });
+    onProgress?.({ stage: "det", percent: 0, message: t("engine.detPage") });
 
     // det 会 transfer 主线程的 buffer，故先为每个 worker 复制一份 rec 用像素
     const detBuf = img.data.buffer as ArrayBuffer;
@@ -151,7 +152,7 @@ export class OcrEngine {
     }
 
     const k = Math.ceil(x / n); // 每核框数（向上取整）
-    onProgress?.({ stage: "alloc", percent: 0, message: `已分配 ${n} 核数，每核识别 ${k} 个文本框（共 ${x} 个，向上取整）` });
+    onProgress?.({ stage: "alloc", percent: 0, message: t("engine.allocBoxes", { n, k, x }) });
 
     // 连续分组：核 g 负责 [g*k, min((g+1)*k, x))，末核可能更少
     const groups: OCRBox[][] = [];
@@ -163,7 +164,7 @@ export class OcrEngine {
       if (this.cancelled()) throw new Error("OCR cancelled");
       const boxes = await this.clients[g].recBatch(img.width, img.height, recBufs[g], group);
       done += group.length;
-      onProgress?.({ stage: "done-box", percent: (done / x) * 100, message: `识别第 ${done}/${x} 个文本框…` });
+      onProgress?.({ stage: "done-box", percent: (done / x) * 100, message: t("engine.recBox", { done, x }) });
       return boxes;
     }));
 
@@ -200,7 +201,7 @@ export class OcrEngine {
       onProgress?.({
         stage: "done-page",
         percent: (done / total) * 100,
-        message: `第 ${pageIndex + 1} 页完成 (${boxes.length} 个文本框)（${done}/${total}）`,
+        message: t("engine.pageDone", { page: pageIndex + 1, boxes: boxes.length, done, total }),
       });
     }
   }

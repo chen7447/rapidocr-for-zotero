@@ -65,6 +65,9 @@ function createBootstrapSandbox() {
       makeDirectory() { throw new Error("IOUtils.makeDirectory not available in test sandbox"); },
       writeUTF8() { throw new Error("IOUtils.writeUTF8 not available in test sandbox"); },
     },
+    PathUtils: {
+      join(...parts) { return parts.join("/"); },
+    },
     ChromeUtils: {
       importESModule() { throw new Error("ChromeUtils not available in test sandbox"); },
     },

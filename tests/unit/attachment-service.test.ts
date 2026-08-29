@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { createOCRAttachment, createParentAndAttachOCR, deriveOcrOutputPath } from "../../src/zotero/attachment-service";
+import { createOCRAttachment, createParentAndAttachOCR } from "../../src/zotero/attachment-service";
 
 type FakeItem = {
   id: number;
@@ -144,21 +144,4 @@ test("createParentAndAttachOCR returns item_not_found when item missing", async 
     indexItems: async () => {},
   });
   assert.equal(result.status, "item_not_found");
-});
-test("deriveOcrOutputPath replaces the .pdf suffix (case-insensitive)", () => {
-  assert.equal(deriveOcrOutputPath("C:\lib\paper.pdf"), "C:\lib\paper-ocr.pdf");
-  assert.equal(deriveOcrOutputPath("C:\lib\PAPER.PDF"), "C:\lib\PAPER-ocr.pdf");
-  assert.equal(deriveOcrOutputPath("/x/a.Pdf"), "/x/a-ocr.pdf");
-});
-
-test("deriveOcrOutputPath appends the suffix when there is no .pdf extension", () => {
-  // Old behavior: replace() was a no-op and the OCR write OVERWROTE the source.
-  assert.equal(deriveOcrOutputPath("C:\lib\scan"), "C:\lib\scan-ocr.pdf");
-  assert.equal(deriveOcrOutputPath("C:\lib\a.pdfx"), "C:\lib\a.pdfx-ocr.pdf");
-});
-
-test("deriveOcrOutputPath never returns the input path (case-insensitive)", () => {
-  for (const p of ["C:\a.pdf", "C:\a.PDF", "C:\a", "C:\a.pdf.pdf", "", "a"]) {
-    assert.notEqual(deriveOcrOutputPath(p).toLowerCase(), p.toLowerCase(), `for input: ${p}`);
-  }
 });

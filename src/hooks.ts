@@ -240,70 +240,77 @@ function ensureJobManager(): JobManager {
             return;
           }
 
-          const { createOCRAttachment, createParentAndAttachOCR, deriveOcrOutputPath } = await import("./zotero/attachment-service");
-          const outputPath = deriveOcrOutputPath(job.path);
-          if (outputPath.toLowerCase() === job.path.toLowerCase()) {
-            throw new Error(t("hooks.unsafePath", { path: job.path }));
-          }
-          await IOUtils.write(outputPath, outputPdf);
-
+          const { createOCRAttachment, createParentAndAttachOCR } = await import("./zotero/attachment-service");
+          // 写入临时目录：导入（拷贝）完成后 finally 删除——成功、导入失败、
+          // 用户取消父条目确认，三条路径都不遗留文件（v1.10.0 孤儿文件修复）
+          const tmpDir = Zotero.getTempDirectory().path;
+          const outputPath = PathUtils.join(tmpDir, `pdfocr-${Date.now()}-${job.attachmentID}.pdf`);
           let ocrAttachmentID: number | undefined;
-          const attachResult = await createOCRAttachment({
-            attachmentID: job.attachmentID,
-            path: outputPath,
-            title: job.title,
-            getItems: zoteroItemsByID,
-            importFromFile: async (opts) => {
-              // Zotero 10 已移除 Zotero.Items.addRaw；用官方 Attachments.importFromFile
-              const item = await Zotero.Attachments.importFromFile({
-                file: opts.file,
-                parentItemID: opts.parentItemID,
-                libraryID: opts.libraryID,
-                title: opts.title,
-              });
-              return { id: item.id };
-            },
-            indexItems: (ids, opts) => Zotero.Fulltext.indexItems(ids, opts),
-          });
+          try {
+            await IOUtils.write(outputPath, outputPdf);
 
-          if (attachResult.status === "sibling_imported") {
-            ocrAttachmentID = attachResult.attachmentID;
-          }
+            const attachResult = await createOCRAttachment({
+              attachmentID: job.attachmentID,
+              path: outputPath,
+              title: job.title,
+              getItems: zoteroItemsByID,
+              importFromFile: async (opts) => {
+                // Zotero 10 已移除 Zotero.Items.addRaw；用官方 Attachments.importFromFile
+                const item = await Zotero.Attachments.importFromFile({
+                  file: opts.file,
+                  parentItemID: opts.parentItemID,
+                  libraryID: opts.libraryID,
+                  title: opts.title,
+                });
+                return { id: item.id };
+              },
+              indexItems: (ids, opts) => Zotero.Fulltext.indexItems(ids, opts),
+            });
 
-          if (attachResult.status === "standalone_attachment") {
-            // PDF has no parent — offer to create one
-            const confirmed = confirmCreateParent(job.title);
-            if (confirmed) {
-              const parentResult = await createParentAndAttachOCR({
-                attachmentID: job.attachmentID,
-                path: outputPath,
-                title: job.title,
-                getItems: zoteroItemsByID,
-                createRegularItem: async (opts) => {
-                  // Zotero 10: new Zotero.Item + saveTx() 代替已移除的 Zotero.Items.addRaw
-                  const item = new Zotero.Item("journalArticle");
-                  item.libraryID = opts.libraryID;
-                  item.setField("title", opts.title);
-                  await item.saveTx();
-                  return { id: item.id };
-                },
-                setAttachmentParent: (attachID, parentID) =>
-                  Zotero.Items.setParent(attachID, parentID),
-                importFromFile: async (opts) => {
-                  // Zotero 10: Attachments.importFromFile 代替已移除的 addRaw
-                  const item = await Zotero.Attachments.importFromFile({
-                    file: opts.file,
-                    parentItemID: opts.parentItemID,
-                    libraryID: opts.libraryID,
-                    title: opts.title,
-                  });
-                  return { id: item.id };
-                },
-                indexItems: (ids, opts) => Zotero.Fulltext.indexItems(ids, opts),
-              });
-              if (parentResult.status === "parent_created") {
-                ocrAttachmentID = parentResult.attachmentID;
+            if (attachResult.status === "sibling_imported") {
+              ocrAttachmentID = attachResult.attachmentID;
+            }
+
+            if (attachResult.status === "standalone_attachment") {
+              // PDF has no parent — offer to create one
+              const confirmed = confirmCreateParent(job.title);
+              if (confirmed) {
+                const parentResult = await createParentAndAttachOCR({
+                  attachmentID: job.attachmentID,
+                  path: outputPath,
+                  title: job.title,
+                  getItems: zoteroItemsByID,
+                  createRegularItem: async (opts) => {
+                    // Zotero 10: new Zotero.Item + saveTx() 代替已移除的 Zotero.Items.addRaw
+                    const item = new Zotero.Item("journalArticle");
+                    item.libraryID = opts.libraryID;
+                    item.setField("title", opts.title);
+                    await item.saveTx();
+                    return { id: item.id };
+                  },
+                  setAttachmentParent: (attachID, parentID) =>
+                    Zotero.Items.setParent(attachID, parentID),
+                  importFromFile: async (opts) => {
+                    // Zotero 10: Attachments.importFromFile 代替已移除的 addRaw
+                    const item = await Zotero.Attachments.importFromFile({
+                      file: opts.file,
+                      parentItemID: opts.parentItemID,
+                      libraryID: opts.libraryID,
+                      title: opts.title,
+                    });
+                    return { id: item.id };
+                  },
+                  indexItems: (ids, opts) => Zotero.Fulltext.indexItems(ids, opts),
+                });
+                if (parentResult.status === "parent_created") {
+                  ocrAttachmentID = parentResult.attachmentID;
+                }
               }
+            }
+          } finally {
+            try { await IOUtils.remove(outputPath, { ignoreAbsent: true }); }
+            catch (cleanupErr) {
+              log(`temp cleanup failed: ${cleanupErr instanceof Error ? cleanupErr.message : String(cleanupErr)}`);
             }
           }
 

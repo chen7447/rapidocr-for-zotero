@@ -51,6 +51,14 @@ export type CreateParentResult =
   | { status: "parent_created"; attachmentID: number }
   | { status: "item_not_found" };
 
+/** Derive the [OCR] sibling output path. Appends the suffix when the path has
+ *  no .pdf extension so the result can NEVER equal the source path — a plain
+ *  `replace()` would leave it untouched and overwrite the original file. */
+export function deriveOcrOutputPath(path: string): string {
+  const replaced = path.replace(/\.pdf$/i, "-ocr.pdf");
+  return replaced !== path ? replaced : `${path}-ocr.pdf`;
+}
+
 export async function createParentAndAttachOCR(deps: CreateParentAndAttachDeps): Promise<CreateParentResult> {
   const items = deps.getItems([deps.attachmentID]);
   if (!items.length) return { status: "item_not_found" };

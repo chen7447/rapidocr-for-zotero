@@ -1,7 +1,6 @@
 import { ContextMenuController, MenuManagerLike } from "./ui/context-menu";
 import { JobManager } from "./jobs/job-manager";
 import { OcrProgressDialog } from "./ui/ocr-dialog";
-import { createOCRAttachment, createParentAndAttachOCR } from "./zotero/attachment-service";
 import { registerPrefs, unregisterPrefs, PreferencePanesLike } from "./ui/preferences";
 import {
   SelectionItem,

@@ -40,7 +40,7 @@ type ReaderLike = {
 const BTN_ID = "pdfocr-toolbar-btn";
 const POP_ID = "pdfocr-toolbar-pop";
 const PLACEHOLDER = 32;
-const STRIP_TIP = "删除 OCR 文字层（该按钮测试使用，不影响 OCR 正常进行）";
+const STRIP_TIP = "删除当前页的 OCR 文字层（可从原件恢复）";
 
 let onSubmit: ((req: PageOcrRequest) => void) | null = null;
 let onStrip: ((req: StripRequest) => void) | null = null;

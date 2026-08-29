@@ -80,15 +80,25 @@ export class OcrEngine {
     }
 
     try {
+      // 模型字节只取一次（原来每个 worker 各 fetch 一遍 ~28MB）；
+      // init 会 transfer（detach 主线程那份），所以每个 worker 发独立副本。
+      // 母本留在本次 run 的作用域内 —— 跨任务缓存留给 v1.10 的常驻池决策。
+      const assets = await fetchModelAssets();
       // 并行打开并初始化所有 worker：模型编译在各 worker 自己的线程里同时进行。
       // （串行初始化会让 N 个 worker 的编译时间线性叠加，吃掉小文档的并行收益）
       await Promise.all(Array.from({ length: n }, async () => {
         if (this.cancelled()) throw new Error("OCR cancelled");
         const client = WorkerClient.open(workerUrl);
         this.clients.push(client); // 同步 push，顺序与 worker 下标一致
-        // 每个 worker 各自 fetch 模型字节：init 会 transfer（detach 主线程那份），不能共用
-        const assets = await fetchModelAssets();
-        await client.init(assets, { detLimitSideLen, detThresh, detBoxThresh, maxRotDeg, cropMode });
+        await client.init(
+          {
+            wasm: assets.wasm.slice(0),
+            det: assets.det.slice(0),
+            rec: assets.rec.slice(0),
+            dict: assets.dict, // 结构化克隆本身拷贝；worker 侧还有 slice()
+          },
+          { detLimitSideLen, detThresh, detBoxThresh, maxRotDeg, cropMode },
+        );
         client.onError((message) => onProgress?.({ stage: "worker-error", percent: -1, message }));
       }));
       if (this.cancelled()) throw new Error("OCR cancelled");

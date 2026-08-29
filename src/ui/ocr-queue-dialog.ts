@@ -1,20 +1,24 @@
 /**
  * Queue-aware OCR progress window ("RapidOCR for Zotero").
  *
- * One window tracks the WHOLE JobManager queue: every enqueued job gets a
- * clickable tab (PDF1, PDF2, …); clicking a tab shows that task's progress,
- * timers and status. A queued task shows "等待中…（等待 PDFx 完成）" while
- * another task runs. "取消当前任务" aborts the running job only; "全部取消"
- * also clears the queue. Closing the window while tasks are active counts as
- * 全部取消 (same semantic as the old single-task dialog).
+ * ONE window embeds ONE CARD per OCR job (用户要求的大窗套小窗布局):
+ * every enqueued PDF gets its own card with an independent progress bar,
+ * status, message and dual timers — all cards visible at once, no tabs.
+ * A queued card shows 等待中…（等待《运行中文件》完成）.
+ * 取消当前任务 aborts the running job only; 全部取消 also clears the queue;
+ * closing the window while tasks are active counts as 全部取消.
+ *
+ * Rendering constraint (learned the hard way): in this chrome about:blank
+ * window, innerHTML injection silently produced nothing — while every
+ * getElementById + textContent / className update worked. So ALL dynamic
+ * content is built with createElement / appendChild / textContent only,
+ * the same DOM APIs as the parts that demonstrably work.
  *
  * Lifecycle: hooks.ts keeps ONE instance for the whole session (see
  * ensureQueueDialog) and re-opens it when closed — task history survives a
- * window close, and the tabs can never diverge from the window (the
- * instance↔window pairing is guarded by an open token). Renders are wrapped:
- * one failing render must not drop the others, and every mutation is logged
- * behind the pdfocrforzotero.debug pref so a missing-tab report comes with
- * evidence.
+ * window close, and the instance↔window pairing is guarded by an open
+ * token. Every mutation logs behind the pdfocrforzotero.debug pref
+ * ("queue-dialog:" prefix) so a rendering report comes with evidence.
  */
 
 import { formatElapsed } from "./ocr-dialog";
@@ -30,6 +34,17 @@ function qdbg(msg: string): void {
 
 type TaskStatus = "queued" | "running" | "completed" | "failed" | "cancelled";
 
+/** DOM handles for one card — all created via createElement (never innerHTML). */
+type TaskRefs = {
+  root: HTMLDivElement;
+  state: HTMLSpanElement;
+  bar: HTMLProgressElement;
+  msg: HTMLSpanElement;
+  pct: HTMLSpanElement;
+  total: HTMLSpanElement;
+  ocr: HTMLSpanElement;
+};
+
 type QueueTask = {
   title: string;
   status: TaskStatus;
@@ -41,6 +56,7 @@ type QueueTask = {
   ocrStart: number | null;
   totalEnd: number | null;
   ocrEnd: number | null;
+  refs: TaskRefs | null;
 };
 
 const STATUS_GLYPH: Record<TaskStatus, string> = {
@@ -71,40 +87,47 @@ const QUEUE_HTML = `<!DOCTYPE html>
     padding: 20px; height: 100vh; display: flex; flex-direction: column;
     user-select: none;
   }
-  h1 { font-size: 16px; font-weight: 600; margin-bottom: 14px; }
-  #task-tabs { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 16px; min-height: 26px; }
-  .tab {
-    display: inline-flex; align-items: center; gap: 6px;
-    padding: 4px 12px; border: 1px solid #45475a; border-radius: 14px;
-    background: #313244; color: #cdd6f4; cursor: pointer; font-size: 12px;
+  h1 { font-size: 16px; font-weight: 600; margin-bottom: 14px; flex: none; }
+  #task-list {
+    flex: 1 1 auto; overflow-y: auto;
+    display: flex; flex-direction: column; gap: 10px;
+    margin-bottom: 14px;
   }
-  .tab:hover { background: #45475a; }
-  .tab.selected { border-color: #89b4fa; box-shadow: 0 0 0 1px #89b4fa inset; }
-  .tab .st { font-size: 11px; }
-  .st.queued { color: #f9e2af; }
-  .st.running { color: #89b4fa; }
-  .st.completed { color: #a6e3a1; }
-  .st.failed { color: #f38ba8; }
-  .st.cancelled { color: #6c7086; }
+  .ocr-card {
+    border: 1px solid #45475a; border-left: 4px solid #6c7086;
+    border-radius: 8px; padding: 10px 12px; background: #181825;
+    flex: none;
+  }
+  .ocr-card.st-queued    { border-left-color: #f9e2af; }
+  .ocr-card.st-running   { border-left-color: #89b4fa; }
+  .ocr-card.st-completed { border-left-color: #a6e3a1; }
+  .ocr-card.st-failed    { border-left-color: #f38ba8; }
+  .ocr-head { display: flex; justify-content: space-between; gap: 8px; margin-bottom: 8px; }
+  .ocr-name {
+    font-size: 13px; font-weight: 600; color: #cdd6f4;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  .ocr-state { font-size: 11px; flex: none; }
+  .ocr-state.st-queued    { color: #f9e2af; }
+  .ocr-state.st-running   { color: #89b4fa; }
+  .ocr-state.st-completed { color: #a6e3a1; }
+  .ocr-state.st-failed    { color: #f38ba8; }
+  .ocr-state.st-cancelled { color: #6c7086; }
   progress {
-    width: 100%; height: 8px; border: none; border-radius: 4px;
+    width: 100%; height: 6px; border: none; border-radius: 3px;
     appearance: none; -webkit-appearance: none;
   }
-  progress::-webkit-progress-bar { background: #313244; border-radius: 4px; }
-  progress::-webkit-progress-value { background: #89b4fa; border-radius: 4px; transition: width 0.3s ease; }
-  progress::-moz-progress-bar { background: #89b4fa; border-radius: 4px; }
-  #progress-text { font-size: 12px; color: #6c7086; margin-top: 6px; text-align: right; }
-  #command-text {
-    margin-top: 14px; font-size: 13px; color: #bac2de;
-    line-height: 1.5; min-height: 40px; word-break: break-all;
+  progress::-webkit-progress-bar { background: #313244; border-radius: 3px; }
+  progress::-webkit-progress-value { background: #89b4fa; border-radius: 3px; transition: width 0.3s ease; }
+  progress::-moz-progress-bar { background: #89b4fa; border-radius: 3px; }
+  .ocr-row {
+    display: flex; justify-content: space-between; gap: 8px;
+    margin-top: 6px; font-size: 12px; color: #bac2de;
   }
-  .timer-line { margin-top: 6px; font-size: 12px; color: #6c7086; }
-  #timer-total-val, #timer-ocr-val { font-weight: 600; }
-  #timer-ocr-val { color: #a6e3a1; }
-  #status-text { margin-top: 8px; font-size: 12px; color: #6c7086; min-height: 1.2em; }
-  #status-text.error { color: #f38ba8; }
-  #status-text.success { color: #a6e3a1; }
-  #actions { margin-top: auto; display: flex; gap: 8px; justify-content: flex-end; }
+  .ocr-msg { word-break: break-all; }
+  .ocr-pct { flex: none; color: #6c7086; }
+  .ocr-timers { margin-top: 4px; font-size: 11px; color: #6c7086; }
+  #actions { flex: none; display: flex; gap: 8px; justify-content: flex-end; }
   button {
     padding: 8px 16px; border: 1px solid #45475a; border-radius: 6px;
     background: #313244; color: #cdd6f4; cursor: pointer; font-size: 13px;
@@ -118,13 +141,7 @@ const QUEUE_HTML = `<!DOCTYPE html>
 </head>
 <body>
   <h1>RapidOCR for Zotero</h1>
-  <div id="task-tabs"></div>
-  <progress id="progress-bar" value="0" max="100"></progress>
-  <div id="progress-text">0%</div>
-  <div id="command-text">正在初始化...</div>
-  <div id="timer-total" class="timer-line">总用时 <span id="timer-total-val">0 s</span></div>
-  <div id="timer-ocr" class="timer-line">RapidOCR 已运行 <span id="timer-ocr-val">0 s</span></div>
-  <div id="status-text"></div>
+  <div id="task-list"></div>
   <div id="actions">
     <button id="cancel-current-btn" class="primary">取消当前任务</button>
     <button id="cancel-all-btn">全部取消</button>
@@ -133,17 +150,10 @@ const QUEUE_HTML = `<!DOCTYPE html>
 </body>
 </html>`;
 
-function esc(s: string): string {
-  return s.replace(/[&<>"']/g, (ch) =>
-    ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[ch] as string),
-  );
-}
-
 export class OcrQueueDialog {
   private win: Window | null = null;
   private readonly tasks = new Map<string, QueueTask>();
   private readonly order: string[] = [];
-  private selectedId: string | null = null;
   private runningId: string | null = null;
   /** Programmatic close (strip flow / shutdown) must NOT trigger cancel. */
   private detached = false;
@@ -157,14 +167,14 @@ export class OcrQueueDialog {
 
   /**
    * Open (or re-open) the window. Task history is kept across re-opens —
-   * hooks reuses one instance for the whole session, so the tabs can never
+   * hooks reuses one instance for the whole session, so the cards can never
    * end up in a different instance than the visible window.
    */
   open(): void {
     const token = ++this.openToken;
     const win = (Services as unknown as {
       ww: { openWindow(parent: unknown, url: string, name: string, features: string, args: unknown): Window };
-    }).ww.openWindow(null, "about:blank", "ocr-pdf-queue", "chrome,resizable,centerscreen,width=560,height=500", null);
+    }).ww.openWindow(null, "about:blank", "ocr-pdf-queue", "chrome,resizable,centerscreen,width=560,height=520", null);
     if (!win) throw new Error("无法打开 OCR 队列窗口");
 
     win.document.open();
@@ -195,13 +205,14 @@ export class OcrQueueDialog {
     });
 
     if (this.tick !== null) clearInterval(this.tick);
-    this.tick = setInterval(() => this.renderTimers(), 1000) as unknown as number;
+    this.tick = setInterval(() => {
+      for (const t of this.tasks.values()) this.paintTimers(t);
+    }, 1000) as unknown as number;
 
     // Re-opened after a close: redraw the retained history.
-    if (this.order.length) {
-      qdbg(`re-opened with ${this.order.length} retained task(s)`);
-      this.renderTabs();
-      this.renderDetail();
+    if (this.tasks.size) {
+      qdbg(`re-opened with ${this.tasks.size} retained task(s)`);
+      this.rebuildCards();
       this.renderButtons();
     }
     qdbg(`open: token=${token}`);
@@ -231,7 +242,7 @@ export class OcrQueueDialog {
 
   // ── task model ──────────────────────────────────────────────────────
 
-  /** Register a job as a tab (queued). Called right after enqueue. */
+  /** Register a job as a card (queued). Called right after enqueue. */
   addTask(id: string, title: string): void {
     if (this.tasks.has(id)) return;
     if (!this.win) {
@@ -241,14 +252,15 @@ export class OcrQueueDialog {
     this.tasks.set(id, {
       title, status: "queued", percent: 0, message: "",
       totalStart: 0, ocrStart: null, totalEnd: null, ocrEnd: null,
+      refs: null,
     });
     this.order.push(id);
-    if (!this.selectedId) this.selectedId = id;
     qdbg(`addTask(${id}) "${title}" — tasks=${this.tasks.size}`);
-    this.safeRender();
+    this.buildCard(id);
+    this.renderButtons();
   }
 
-  /** Job started running (JobManager onJobStarted). Auto-selects its tab. */
+  /** Job started running (JobManager onJobStarted). */
   markRunning(id: string, title: string): void {
     let t = this.tasks.get(id);
     if (!t) {
@@ -259,6 +271,7 @@ export class OcrQueueDialog {
       t = {
         title, status: "queued", percent: 0, message: "",
         totalStart: 0, ocrStart: null, totalEnd: null, ocrEnd: null,
+        refs: null,
       };
       this.tasks.set(id, t);
       this.order.push(id);
@@ -270,9 +283,9 @@ export class OcrQueueDialog {
     t.ocrEnd = null;
     t.message = "正在准备…";
     this.runningId = id;
-    this.selectedId = id;
-    qdbg(`markRunning(${id}) "${title}" — tasks=${this.tasks.size} order=${this.order.length}`);
-    this.safeRender();
+    qdbg(`markRunning(${id}) "${title}" — tasks=${this.tasks.size}`);
+    this.paint(t);
+    this.renderButtons();
   }
 
   /** Progress from the executor. percent < 0 updates the message only. */
@@ -282,7 +295,7 @@ export class OcrQueueDialog {
     if (percent >= 0) t.percent = Math.min(100, Math.max(0, percent));
     if (stage === "alloc" && t.ocrStart === null) t.ocrStart = Date.now();
     if (message) t.message = message;
-    if (id === this.selectedId) this.safeRenderDetail();
+    this.paint(t);
   }
 
   /** Terminal state. Idempotent — cancelCurrent emits before the executor's catch. */
@@ -297,123 +310,107 @@ export class OcrQueueDialog {
     t.totalEnd = Date.now();
     if (t.ocrStart !== null) t.ocrEnd = Date.now();
     t.message = message;
-    const wasSelectedRunning = this.selectedId === id && this.runningId === id;
     if (this.runningId === id) this.runningId = null;
-    if (wasSelectedRunning) {
-      const nextId = this.order.find((k) => this.tasks.get(k)!.status === "running");
-      if (nextId) { this.selectedId = nextId; this.runningId = nextId; }
-    }
-    qdbg(`finishTask(${id}) → ${status} — tasks=${this.tasks.size} order=${this.order.length}`);
-    if (this.win) this.safeRender();
+    qdbg(`finishTask(${id}) → ${status} — tasks=${this.tasks.size}`);
+    this.paint(t);
+    this.renderButtons();
   }
 
-  selectTask(id: string): void {
-    if (!this.tasks.has(id)) return;
-    this.selectedId = id;
-    this.safeRender();
-  }
+  // ── card rendering (createElement only — innerHTML is a proven no-op here) ──
 
-  // ── rendering ───────────────────────────────────────────────────────
-
-  /** One failing render must not drop the others or kill the mutation. */
-  private safeRender(): void {
-    if (!this.win) return;
-    this.safeRenderDetail();
-    try { this.renderTabs(); } catch (err) { qdbg(`renderTabs failed: ${err}`); }
-    try { this.renderButtons(); } catch (err) { qdbg(`renderButtons failed: ${err}`); }
-  }
-
-  private safeRenderDetail(): void {
-    try { this.renderDetail(); } catch (err) { qdbg(`renderDetail failed: ${err}`); }
-  }
-
-  private tabLabel(id: string): string {
-    return `PDF${this.order.indexOf(id) + 1}`;
-  }
-
-  private renderTabs(): void {
-    const host = this.win?.document.getElementById("task-tabs");
-    if (!host) {
-      qdbg("renderTabs: #task-tabs not found");
+  /** Rebuild every card from retained state (window re-open). */
+  private rebuildCards(): void {
+    const w = this.win;
+    if (!w) return;
+    const list = w.document.getElementById("task-list");
+    if (!list) {
+      qdbg("rebuildCards: #task-list not found");
       return;
     }
-    if (this.order.length !== this.tasks.size) {
-      // Self-heal: Map preserves insertion order, so rebuilding is stable.
-      qdbg(`renderTabs: order(${this.order.length}) != tasks(${this.tasks.size}) — healing`);
-      this.order.length = 0;
-      for (const k of this.tasks.keys()) this.order.push(k);
+    list.textContent = ""; // drop stale children
+    for (const t of this.tasks.values()) t.refs = null;
+    for (const id of this.order) {
+      if (this.tasks.has(id)) this.buildCard(id);
     }
-    host.innerHTML = this.order.map((id) => {
-      const t = this.tasks.get(id)!;
-      const sel = id === this.selectedId ? " selected" : "";
-      return `<button type="button" class="tab${sel}" data-id="${esc(id)}" ` +
-        `title="${esc(t.title)}（${STATUS_TEXT[t.status]}）">` +
-        `<span>${this.tabLabel(id)}</span><span class="st ${t.status}">${STATUS_GLYPH[t.status]}</span></button>`;
-    }).join("");
-    host.querySelectorAll("button.tab").forEach((btn: Element) => {
-      btn.addEventListener("click", (ev: Event) => {
-        ev.preventDefault();
-        const id = (ev.currentTarget as HTMLElement).dataset.id;
-        if (id) this.selectTask(id);
-      });
-    });
   }
 
-  private renderDetail(): void {
-    const w = this.win;
-    if (!w) return;
-    const bar = w.document.getElementById("progress-bar") as HTMLProgressElement | null;
-    const pct = w.document.getElementById("progress-text");
-    const cmd = w.document.getElementById("command-text");
-    const status = w.document.getElementById("status-text");
-    const t = this.selectedId ? this.tasks.get(this.selectedId) : undefined;
-    if (!t || !bar || !pct || !cmd || !status) return;
+  private el<K extends keyof HTMLElementTagNameMap>(
+    tag: K,
+    cls: string,
+    parent: Element | null,
+  ): HTMLElementTagNameMap[K] {
+    const node = this.win!.document.createElement(tag);
+    if (cls) node.className = cls;
+    parent?.append(node);
+    return node;
+  }
 
+  private buildCard(id: string): void {
+    const w = this.win;
+    const t = this.tasks.get(id);
+    if (!w || !t || t.refs) return;
+    const list = w.document.getElementById("task-list");
+    if (!list) {
+      qdbg(`buildCard(${id}): #task-list not found`);
+      return;
+    }
+    const root = this.el("div", `ocr-card st-${t.status}`, list);
+    const head = this.el("div", "ocr-head", root);
+    const name = this.el("span", "ocr-name", head);
+    name.textContent = t.title;
+    name.title = t.title;
+    const state = this.el("span", "ocr-state", head);
+    const bar = this.el("progress", "", root) as HTMLProgressElement;
+    bar.max = 100;
+    const row = this.el("div", "ocr-row", root);
+    const msg = this.el("span", "ocr-msg", row);
+    const pct = this.el("span", "ocr-pct", row);
+    const timers = this.el("div", "ocr-timers", root);
+    timers.append("总用时 ");
+    const total = this.el("span", "", timers);
+    timers.append(" · RapidOCR ");
+    const ocr = this.el("span", "", timers);
+
+    t.refs = { root, state, bar, msg, pct, total, ocr };
+    this.paint(t);
+  }
+
+  /** Push one task's state into its card. */
+  private paint(t: QueueTask): void {
+    const r = t.refs;
+    if (!r) return;
+    r.root.className = `ocr-card st-${t.status}`;
+    r.state.textContent = `${STATUS_GLYPH[t.status]} ${STATUS_TEXT[t.status]}`;
+    r.state.className = `ocr-state st-${t.status}`;
     if (t.status === "queued") {
-      bar.value = 0;
-      pct.textContent = "0%";
-      const runningId = this.runningId;
-      cmd.textContent = runningId
-        ? `等待中…（等待 ${this.tabLabel(runningId)} 完成）`
+      r.bar.value = 0;
+      r.pct.textContent = "0%";
+      const running = this.runningId ? this.tasks.get(this.runningId) : undefined;
+      r.msg.textContent = running && running.status === "running"
+        ? `等待中…（等待《${running.title}》完成）`
         : "等待中…";
-      status.textContent = "⏳ 等待中";
-      status.className = "";
     } else if (t.status === "running") {
-      bar.value = t.percent;
-      pct.textContent = `${Math.round(t.percent)}%`;
-      cmd.textContent = t.message || "处理中…";
-      status.textContent = "";
-      status.className = "";
-    } else if (t.status === "completed") {
-      bar.value = 100;
-      pct.textContent = "100%";
-      cmd.textContent = t.message;
-      status.textContent = "✓ 完成";
-      status.className = "success";
-    } else if (t.status === "failed") {
-      cmd.textContent = t.message;
-      status.textContent = "✗ 失败";
-      status.className = "error";
+      r.bar.value = t.percent;
+      r.pct.textContent = `${Math.round(t.percent)}%`;
+      r.msg.textContent = t.message || "处理中…";
     } else {
-      cmd.textContent = t.message;
-      status.textContent = "已取消";
-      status.className = "";
+      if (t.status === "completed") {
+        r.bar.value = 100;
+        r.pct.textContent = "100%";
+      }
+      r.msg.textContent = t.message;
     }
-    this.renderTimers();
+    this.paintTimers(t);
   }
 
-  private renderTimers(): void {
-    const w = this.win;
-    if (!w) return;
-    const totalEl = w.document.getElementById("timer-total-val");
-    const ocrEl = w.document.getElementById("timer-ocr-val");
-    const t = this.selectedId ? this.tasks.get(this.selectedId) : undefined;
-    if (!t || !totalEl || !ocrEl) return;
+  private paintTimers(t: QueueTask): void {
+    const r = t.refs;
+    if (!r) return;
     const now = Date.now();
     const totalMs = t.totalStart > 0 ? (t.totalEnd ?? now) - t.totalStart : 0;
     const ocrMs = t.ocrStart !== null ? (t.ocrEnd ?? now) - t.ocrStart : 0;
-    totalEl.textContent = formatElapsed(totalMs);
-    ocrEl.textContent = formatElapsed(ocrMs);
+    r.total.textContent = formatElapsed(totalMs);
+    r.ocr.textContent = formatElapsed(ocrMs);
   }
 
   private renderButtons(): void {

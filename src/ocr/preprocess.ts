@@ -1,22 +1,40 @@
 // src/ocr/preprocess.ts
 // Image preprocessing for PP-OCRv4 models (RapidOCR).
 // Pure-JS implementation — no OpenCV, no canvas, no numpy.
+//
+// resizeToCHW does resize + normalize + HWC→CHW in ONE pass (the original
+// three-pass pipeline). tests/unit/preprocess.test.ts holds a verbatim copy
+// of the old implementation as a bit-exact spec — the interpolated value is
+// Math.fround'ed here because the old code stored it into a Float32Array
+// before normalizing, and skipping that rounding would drift in the last ulp.
 
-// ─── bilinear resize ─────────────────────────────────────────────────
+// ─── round to multiple of 32 ─────────────────────────────────────────
+
+function roundTo32(v: number): number {
+  return Math.round(v / 32) * 32;
+}
 
 /**
- * Resize an RGBA pixel buffer to the target dimensions using bilinear
- * interpolation.  Returns a **Float32Array** of length dstW × dstH × 3
- * (RGB channels only, no alpha).
+ * Bilinear resize straight into a normalized CHW tensor.
+ *
+ * Arithmetic order is IDENTICAL to the old three-pass pipeline: the bilinear
+ * interpolation result is rounded to float32 (Math.fround — the old code
+ * stored it into a Float32Array first), then normalized as
+ * (v/255 - 0.5)/0.5 in float64, then stored once more as float32.
+ *
+ * @param bgr  Write channels in BGR order (rec model expects OpenCV's BGR;
+ *             det expects RGB).
  */
-function resizeBilinear(
+function resizeToCHW(
   src: Uint8ClampedArray,
   srcW: number,
   srcH: number,
   dstW: number,
   dstH: number,
+  bgr: boolean,
 ): Float32Array {
-  const out = new Float32Array(dstW * dstH * 3);
+  const chw = new Float32Array(3 * dstH * dstW);
+  const plane = dstH * dstW;
   const xRatio = srcW / dstW;
   const yRatio = srcH / dstH;
 
@@ -25,6 +43,7 @@ function resizeBilinear(
     const y0 = Math.floor(srcY);
     const y1 = Math.min(y0 + 1, srcH - 1);
     const yFrac = srcY - y0;
+    const row = dy * dstW;
 
     for (let dx = 0; dx < dstW; dx++) {
       const srcX = dx * xRatio;
@@ -32,28 +51,27 @@ function resizeBilinear(
       const x1 = Math.min(x0 + 1, srcW - 1);
       const xFrac = srcX - x0;
 
-      const dstIdx = (dy * dstW + dx) * 3;
+      const i00 = (y0 * srcW + x0) * 4;
+      const i10 = (y0 * srcW + x1) * 4;
+      const i01 = (y1 * srcW + x0) * 4;
+      const i11 = (y1 * srcW + x1) * 4;
+      const col = row + dx;
 
-      // 4 source pixels around the target point
       for (let c = 0; c < 3; c++) {
-        const p00 = src[(y0 * srcW + x0) * 4 + c];
-        const p10 = src[(y0 * srcW + x1) * 4 + c];
-        const p01 = src[(y1 * srcW + x0) * 4 + c];
-        const p11 = src[(y1 * srcW + x1) * 4 + c];
+        const p00 = src[i00 + c];
+        const p10 = src[i10 + c];
+        const p01 = src[i01 + c];
+        const p11 = src[i11 + c];
 
         const top = p00 + (p10 - p00) * xFrac;
         const bot = p01 + (p11 - p01) * xFrac;
-        out[dstIdx + c] = top + (bot - top) * yFrac;
+        const v = Math.fround(top + (bot - top) * yFrac); // float32 store of the old HWC buffer
+        const norm = (v / 255 - 0.5) / 0.5;
+        chw[(bgr ? 2 - c : c) * plane + col] = norm;
       }
     }
   }
-  return out;
-}
-
-// ─── round to multiple of 32 ─────────────────────────────────────────
-
-function roundTo32(v: number): number {
-  return Math.round(v / 32) * 32;
+  return chw;
 }
 
 // ─── det preprocess ──────────────────────────────────────────────────
@@ -103,28 +121,9 @@ export function detPreprocess(
   if (resizeW < 1) resizeW = 1;
   if (resizeH < 1) resizeH = 1;
 
-  // 2. Resize
-  const rgb = resizeBilinear(pixels, width, height, resizeW, resizeH);
-
-  // 3. Normalize: (val / 255 - 0.5) / 0.5  → range [-1, 1]
-  const len = resizeW * resizeH * 3;
-  const norm = new Float32Array(len);
-  for (let i = 0; i < len; i++) {
-    norm[i] = (rgb[i] / 255 - 0.5) / 0.5;
-  }
-
-  // 4. HWC → CHW + batch dim [1, 3, H, W]
-  //    Input norm is HWC flat (H*W*3).
-  //    Output tensor is CHW flat (3*H*W) with batch dim.
-  const chw = new Float32Array(3 * resizeH * resizeW);
-  for (let y = 0; y < resizeH; y++) {
-    for (let x = 0; x < resizeW; x++) {
-      const hwcIdx = (y * resizeW + x) * 3;
-      for (let c = 0; c < 3; c++) {
-        chw[c * resizeH * resizeW + y * resizeW + x] = norm[hwcIdx + c];
-      }
-    }
-  }
+  // 2. Resize + normalize + HWC→CHW in one pass (RGB, bit-exact with the
+  //    old three-pass pipeline — see tests/unit/preprocess.test.ts)
+  const chw = resizeToCHW(pixels, width, height, resizeW, resizeH, false);
 
   return {
     tensor: chw, // [1, 3, H, W] — caller adds batch dim if needed
@@ -173,27 +172,9 @@ export function recPreprocess(
   // Ensure minimum width
   if (resizedW < 4) resizedW = 4;
 
-  // Resize to (resizedW, imgH) — uses bilinear, returns Float32Array RGB
-  const rgb = resizeBilinear(pixels, width, height, resizedW, imgH);
-
-  // Normalize: (val / 255 - 0.5) / 0.5  → range [-1, 1]
-  // Then convert RGB → BGR by swapping channels 0 ↔ 2 (PP-OCR models
-  // were trained on BGR images from OpenCV).
-  const area = imgH * resizedW;
-  const chw = new Float32Array(3 * area);
-
-  for (let y = 0; y < imgH; y++) {
-    for (let x = 0; x < resizedW; x++) {
-      const hwcIdx = (y * resizedW + x) * 3;
-      const r = (rgb[hwcIdx] / 255 - 0.5) / 0.5;
-      const g = (rgb[hwcIdx + 1] / 255 - 0.5) / 0.5;
-      const b = (rgb[hwcIdx + 2] / 255 - 0.5) / 0.5;
-      // BGR order: channel 0 = B, channel 1 = G, channel 2 = R
-      chw[0 * area + y * resizedW + x] = b;
-      chw[1 * area + y * resizedW + x] = g;
-      chw[2 * area + y * resizedW + x] = r;
-    }
-  }
+  // Resize to (resizedW, imgH) + normalize + RGB→BGR + HWC→CHW in one pass
+  // (bit-exact with the old pipeline — see tests/unit/preprocess.test.ts)
+  const chw = resizeToCHW(pixels, width, height, resizedW, imgH, true);
 
   return { tensor: chw, scale: resizedW / width, width: resizedW, height: imgH };
 }

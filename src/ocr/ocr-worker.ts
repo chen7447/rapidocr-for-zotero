@@ -170,7 +170,7 @@ async function detOnly(pixels: Uint8ClampedArray, w: number, h: number): Promise
     cropMode: opts.cropMode,
   });
 
-  return nmsBoxes(detRes.boxes.map((b) => ({ points: b.points.slice(), raw: b.raw, score: b.score, text: "" })));
+  return nmsBoxes(detRes.boxes.map((b) => ({ points: b.points.slice(), raw: b.raw, score: b.score, text: "" })), w);
 }
 
 /** 对给定框列表逐个裁剪+识别（不再 nms——detOnly 已做过）。单页并行第二阶段用。 */

@@ -27,7 +27,7 @@ import {
 } from "pdf-lib";
 import fontkit from "@pdf-lib/fontkit";
 import { OCRResult } from "./types";
-import { readingOrder } from "./postprocess";
+import { orderBoxes } from "./postprocess";
 
 /** Marked-content tag wrapping our overlay so a later pass can drop it. */
 export const OCR_MARK = "PdfOcrV3";
@@ -142,7 +142,7 @@ export async function addOcrLayerToPdf(
       ? (pageResult.pageWidthPoints || pw) / pageResult.pageWidth
       : 0.5;
 
-    for (const box of readingOrder(pageResult.boxes)) {
+    for (const box of orderBoxes(pageResult.boxes, pageResult.pageWidth)) {
       const text = box.text.trim();
       if (!text) continue;
 

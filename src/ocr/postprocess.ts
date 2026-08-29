@@ -435,7 +435,7 @@ type BoxLike = { raw: { x1: number; y1: number; x2: number; y2: number }; score:
  * Must run AFTER garbage text is removed — a formula parent that recoded as
  * 8888 is already gone, so ABn/ABt stay; a body line stays and eats its chips.
  */
-export function nmsBoxes<T extends BoxLike>(boxes: T[], contain = 0.7, iou = 0.5): T[] {
+export function nmsBoxes<T extends BoxLike>(boxes: T[], contain = 0.7, iou = 0.5, pageWidth?: number): T[] {
   const withoutChips = boxes.filter((child, i) => {
     const cArea = boxArea(child.raw);
     if (cArea <= 0) return false;
@@ -457,7 +457,105 @@ export function nmsBoxes<T extends BoxLike>(boxes: T[], contain = 0.7, iou = 0.5
     })) continue;
     kept.push(box);
   }
-  return readingOrder(kept);
+  return orderBoxes(kept, pageWidth);
+}
+
+// ─── column-aware page ordering ─────────────────────────────────────
+
+/** Full-wide threshold as a share of page width (titles/abstracts/spanning figures). */
+const FULL_WIDE_SHARE = 0.55;
+/** A blank vertical band must be at least this share of page width to count as a gutter. */
+const GUTTER_MIN_SHARE = 0.035;
+/** Each side of a gutter needs at least this many boxes… */
+const GUTTER_MIN_BOXES = 3;
+/** …and at least this share of the non-full-wide boxes. */
+const GUTTER_MIN_SHARE_BOXES = 0.15;
+/** x-projection resolution (buckets across the page width). */
+const HIST_BUCKETS = 100;
+/** More candidate columns than this → pathological, fall back to single column. */
+const MAX_COLUMNS = 3;
+
+/**
+ * Page-level reading order with optional column detection.
+ * 双栏页面按「左栏全部 → 右栏全部」排序；单栏与无法确定的情况走原
+ * `readingOrder()`（单列语义）。检测是保守的：任何显著性/位置条件不满足
+ * 都回退——最坏情况 = v1.9 行为，永不劣化。
+ */
+export function orderBoxes<T extends BoxLike>(boxes: T[], pageWidth?: number): T[] {
+  if (!pageWidth || pageWidth <= 0 || boxes.length < 8) return readingOrder(boxes);
+  const groups = detectColumnGroups(boxes, pageWidth);
+  if (!groups) return readingOrder(boxes);
+  const out: T[] = [];
+  for (const group of groups) out.push(...readingOrder(group));
+  return out;
+}
+
+/**
+ * Split page boxes into column groups, or null when the page does not
+ * clearly look columnar. Full-wide boxes (titles/abstracts) are only kept
+ * — as a leading group — when they all sit ABOVE the columnar body; any
+ * mid-page spanning element means the layout is not a clean column grid.
+ */
+function detectColumnGroups<T extends BoxLike>(boxes: T[], pageWidth: number): T[][] | null {
+  const fullWideLimit = FULL_WIDE_SHARE * pageWidth;
+  const fullWide: T[] = [];
+  const rest: T[] = [];
+  for (const b of boxes) {
+    (b.raw.x2 - b.raw.x1 >= fullWideLimit ? fullWide : rest).push(b);
+  }
+  if (rest.length < 6) return null;
+
+  // x-projection coverage of the non-full-wide boxes
+  const cov = new Uint16Array(HIST_BUCKETS);
+  for (const b of rest) {
+    const a = Math.max(0, Math.min(HIST_BUCKETS - 1, Math.floor((b.raw.x1 / pageWidth) * HIST_BUCKETS)));
+    const z = Math.max(1, Math.min(HIST_BUCKETS, Math.ceil((b.raw.x2 / pageWidth) * HIST_BUCKETS)));
+    for (let i = a; i < z; i++) cov[i]++;
+  }
+  let first = -1;
+  let last = -1;
+  for (let k = 0; k < HIST_BUCKETS; k++) {
+    if (cov[k] > 0) {
+      if (first < 0) first = k;
+      last = k;
+    }
+  }
+  if (first < 0) return null;
+
+  const minGap = Math.max(1, Math.round(GUTTER_MIN_SHARE * HIST_BUCKETS));
+  const cuts: number[] = []; // bucket index where coverage resumes after each gutter
+  let runStart = -1;
+  for (let k = first; k <= last; k++) {
+    if (cov[k] === 0) {
+      if (runStart < 0) runStart = k;
+    } else {
+      if (runStart >= 0 && k - runStart >= minGap) cuts.push(k);
+      runStart = -1;
+    }
+  }
+  if (cuts.length < 1 || cuts.length > MAX_COLUMNS - 1) return null;
+
+  const bounds: number[] = [
+    (first / HIST_BUCKETS) * pageWidth,
+    ...cuts.map((c) => (c / HIST_BUCKETS) * pageWidth),
+    ((last + 1) / HIST_BUCKETS) * pageWidth,
+  ];
+  const groups: T[][] = Array.from({ length: bounds.length - 1 }, () => []);
+  const minSide = Math.max(GUTTER_MIN_BOXES, Math.ceil(rest.length * GUTTER_MIN_SHARE_BOXES));
+  for (const b of rest) {
+    const cx = (b.raw.x1 + b.raw.x2) / 2;
+    let gi = 0;
+    while (gi < cuts.length && cx >= bounds[gi + 1]) gi++;
+    groups[gi].push(b);
+  }
+  if (groups.some((g) => g.length < minSide)) return null;
+
+  if (fullWide.length) {
+    const bodyTop = Math.min(...rest.map((b) => b.raw.y1));
+    if (!fullWide.every((b) => b.raw.y2 <= bodyTop)) return null;
+    return [fullWide, ...groups];
+  }
+  return groups;
 }
 
 /** Top-to-bottom, then left-to-right within a line — PDF selection follows write order. */

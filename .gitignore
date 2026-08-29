@@ -5,13 +5,12 @@
 /tests/fixtures/generated/*.txt
 /tests/fixtures/generated/*.json
 
-# Local check artifacts
-/scripts/*.pdf
-/scripts/*.rgba
-/scripts/*.jpg
-/scripts/*.raw
-/scripts/python_*
-/scripts/_digit-cmap.pdf
+# Local check artifacts (one-off debug scripts live in /tools/debug)
+/tools/debug/*.pdf
+/tools/debug/*.rgba
+/tools/debug/*.jpg
+/tools/debug/*.raw
+/tools/debug/python_*
 
 # Build and dependency output
 /node_modules/

@@ -66,12 +66,14 @@ function makeController(
   return { controller, menuManager };
 }
 
-test("register includes a main-window localization resource and direct l10n id", () => {
+test("register sets the menu label via onShowing (Zotero 10 MenuManager)", () => {
   const { controller, menuManager } = makeController([]);
   controller.register();
   const registration = menuManager.registered[0];
-  assert.equal(registration.menus[0].l10nID, "pdf-ocr-menu-create");
-  assert.equal(registration.menus[0].l10nArgs, undefined);
+  assert.equal(registration.menus[0].l10nID, undefined);
+  const elem = { label: "" };
+  registration.menus[0].onShowing({}, { menuElem: elem });
+  assert.equal(elem.label, "OCR PDF");
 });
 
 test("register uses the 16x16 context-fill menu icon", () => {

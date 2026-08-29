@@ -38,7 +38,7 @@ test("registerPrefs calls PreferencePanes.register with required fields", async 
   assert.equal(call.pluginID, "pdfocrforzotero@example.com");
   assert.equal(call.id, "pdf-ocr-for-zotero-prefs");
   assert.ok(call.src.includes("content/preferences.xhtml"));
-  assert.ok(call.label.includes("PDF OCR"));
+  assert.ok(call.label.includes("RapidOCR for Zotero"));
   assert.ok(call.image.includes("pdf-ocr.svg"));
   assert.equal(call.scripts.length, 1);
   assert.ok(call.scripts[0].includes("content/preferences.js"));

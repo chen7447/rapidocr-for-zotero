@@ -38,7 +38,12 @@ function createBootstrapSandbox() {
       logError() {},
     },
     Services: {
-      io: { newURI(value) { return value; } },
+      io: {
+        newURI(value) { return value; },
+        getProtocolHandler() {
+          return { QueryInterface() { return this; }, setSubstitution() {} };
+        },
+      },
       scriptloader: {
         loadSubScript(uri, target) {
           calls.loadSubScript.push({ uri, target });
@@ -150,7 +155,7 @@ test("hooks wire job manager, progress dialog, and MenuManager", () => {
   assert.match(hooks, /JobManager/);
   assert.match(hooks, /OcrProgressDialog/);
   assert.match(hooks, /contextMenuController\.register\(\)/);
-  assert.match(hooks, /contextMenuController\?\.unregister\(\)/);
+  assert.match(hooks, /contextMenuController\.unregister\(\)/);
   assert.match(hooks, /jobManager\?\.shutdown\(\)/);
   assert.match(hooks, /createParentAndAttachOCR/);
   assert.match(hooks, /Services\.prompt/);

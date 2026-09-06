@@ -44,6 +44,8 @@ export type OcrOptions = {
   pageIndexes?: number[];
   /** 手绘框(选择区域)区域,PDF points,top-left/y-down/scale-1。命中某页时改为按框裁剪独立 OCR。 */
   regions?: Array<{ pageIndex: number; x1: number; y1: number; x2: number; y2: number }>;
+  /** 双栏版面:b56 起同时决定圈间阅读序(横贯带切区,区内先左栏后右栏);不勾=圈按 y→x。 */
+  twoColumn?: boolean;
 };
 
 export class OcrEngine {
@@ -63,7 +65,7 @@ export class OcrEngine {
 
   /** Run OCR on selected pages of `renderer` (all pages if `pageIndexes` omitted). */
   async run(): Promise<OCRResult> {
-    const { detThresh = 0.3, detBoxThresh = 0.4, detLimitSideLen = 1536, maxRotDeg = 30, cropMode = 2, workers = 4, onProgress, pageIndexes, regions } = this.options;
+    const { detThresh = 0.3, detBoxThresh = 0.4, detLimitSideLen = 1536, maxRotDeg = 30, cropMode = 2, workers = 4, onProgress, pageIndexes, regions, twoColumn } = this.options;
     const pageCount = this.renderer.pageCount;
     const indexes = resolvePageIndexes(pageCount, pageIndexes);
     if (!indexes.length) throw new Error("No pages to OCR");
@@ -110,7 +112,7 @@ export class OcrEngine {
       if (this.cancelled()) throw new Error("OCR cancelled");
 
       if (singlePage) {
-        return await this.runSinglePage(indexes[0], n, onProgress, regions);
+        return await this.runSinglePage(indexes[0], n, onProgress, regions, twoColumn);
       }
 
       const total = indexes.length;
@@ -137,6 +139,7 @@ export class OcrEngine {
     n: number,
     onProgress?: OcrProgressSink,
     regions?: Array<{ pageIndex: number; x1: number; y1: number; x2: number; y2: number }>,
+    twoColumn?: boolean,
   ): Promise<OCRResult> {
     const img = await this.renderer.renderPage(pageIndex);
     if (this.cancelled()) throw new Error("OCR cancelled");
@@ -242,8 +245,8 @@ export class OcrEngine {
         marks.push({ raw: d.raw, cls: "norec" });
         stage.push(`[未返回] ${bb(d)} rec 空/垃圾文本`);
       }
-      const frameOrder = frameReadingOrder(rects);
-      stage.push(`[写序] 圈按 y→x 排: ${frameOrder.map((i) => "F" + i).join(" > ")}`);
+      const frameOrder = frameReadingOrder(rects, img.width, twoColumn);
+      stage.push(`[写序] ${twoColumn ? "双栏:横贯带→左栏→右栏" : "圈按 y→x"} 排: ${frameOrder.map((i) => "F" + i).join(" > ")}`);
       const out = frameOrder.map((fi) => stackedOrder(fullBlocks[fi])).flat();
       // 分堆效果只能量最终序:同一行带内大幅向左回跳 = 还在左右逐行交错;正常量级 ≈ 圈数
       // (每个圈到下一个圈的边界各一次)。

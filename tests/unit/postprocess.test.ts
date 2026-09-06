@@ -153,6 +153,24 @@ test("frameReadingOrder: 圈按版面 y→x 排,不按画框先后", () => {
   );
 });
 
+// b56: 圈=白名单,双栏=圈间顺序。横贯带(标题)切区,区内先左栏后右栏。
+// 圈位取自用户实页形态:右栏摘要圈的上沿高于左栏引言圈 — 老的 y→x 会把摘要抢到引言前。
+test("frameReadingOrder twoColumn: 横贯带切区,区内先左栏后右栏", () => {
+  const rects = [
+    { x1: 58, y1: 294, x2: 1142, y2: 377 }, // 0 标题横贯带(整宽=墙)
+    { x1: 645, y1: 133, x2: 867, y2: 694 }, // 1 右栏摘要(从页眉拉下来)
+    { x1: 268, y1: 768, x2: 522, y2: 1048 }, // 2 左栏引言
+    { x1: 645, y1: 1020, x2: 867, y2: 1330 }, // 3 右栏 2.1
+  ];
+  // 不勾双栏:老语义 y→x — 标题、摘要(右)、引言(左)、2.1
+  assert.deepEqual(frameReadingOrder(rects, 1190, false), [0, 1, 2, 3]);
+  // 勾双栏:标题墙 → 区内左(引言) → 右(摘要、2.1)
+  assert.deepEqual(frameReadingOrder(rects, 1190, true), [0, 2, 1, 3]);
+  // 无横贯带时:纯双栏序,左栏圈全部先于右栏圈
+  const noWall = [rects[1], rects[2], rects[3]];
+  assert.deepEqual(frameReadingOrder(noWall, 1190, true), [1, 0, 2]);
+});
+
 test("stackedOrder: 圈内跨栏的两堆先读左堆再读右堆,不再逐行交错", () => {
   const key = (b: BoxLike): string => `${b.raw.x1},${b.raw.y1}`;
   // b45 实测 F3 圈(70,1064~961,1244)横跨两栏:原先出成 左1 右1 左2 右2

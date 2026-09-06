@@ -527,6 +527,8 @@ export function stackedOrder<T extends BoxLike>(boxes: T[]): T[] {
  */
 export function frameReadingOrder(
 	rects: { x1: number; y1: number; x2: number; y2: number }[],
+	pageW?: number,
+	twoColumn?: boolean,
 ): number[] {
 	const byTop = rects.map((_, i) => i).sort((a, b) => rects[a].y1 - rects[b].y1 || rects[a].x1 - rects[b].x1);
 	const bands: number[][] = [];
@@ -537,7 +539,28 @@ export function frameReadingOrder(
 		if (band && ref && ov >= Math.max(1, rects[i].y2 - rects[i].y1) * 0.5) band.push(i);
 		else bands.push([i]);
 	}
-	return bands.map((b) => b.sort((x, y) => rects[x].x1 - rects[y].x1)).flat();
+	const order = bands.map((b) => b.sort((x, y) => rects[x].x1 - rects[y].x1)).flat();
+	// b56 双栏×圈选:圈=白名单(识别哪些),双栏=圈间顺序(怎么读)。
+	// 横贯带(宽>0.6页宽,标题/表格)当分区墙:墙前的圈先读;区内先左栏(y→x)后右栏(y→x)。
+	if (!twoColumn || !pageW || pageW <= 0) return order;
+	const isFull = (i: number) => rects[i].x2 - rects[i].x1 > pageW * 0.6;
+	const cy = (i: number) => (rects[i].y1 + rects[i].y2) / 2;
+	const colCmp = (a: number, b: number) => rects[a].y1 - rects[b].y1 || rects[a].x1 - rects[b].x1;
+	const cols = order.filter((i) => !isFull(i));
+	const emitCols = (lo: number, hi: number): number[] => {
+		const inZone = cols.filter((i) => cy(i) > lo && cy(i) <= hi);
+		const left = inZone.filter((i) => (rects[i].x1 + rects[i].x2) / 2 < pageW / 2).sort(colCmp);
+		const right = inZone.filter((i) => (rects[i].x1 + rects[i].x2) / 2 >= pageW / 2).sort(colCmp);
+		return [...left, ...right];
+	};
+	const out: number[] = [];
+	let prev = -Infinity;
+	for (const f of order.filter(isFull).sort((a, b) => rects[a].y1 - rects[b].y1)) {
+		out.push(...emitCols(prev, rects[f].y1), f);
+		prev = rects[f].y1;
+	}
+	out.push(...emitCols(prev, Infinity));
+	return out;
 }
 
 /** Top-to-bottom, then left-to-right within a line — PDF selection follows write order. */

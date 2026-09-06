@@ -210,6 +210,7 @@ function ensureJobManager(): JobManager {
             workers: ocrWorkers,
             pageIndexes: job.pageIndexes,
             regions: job.regions,
+            twoColumn: !!job.twoColumn,
             isCancelled: jobCancelled,
             onProgress: (info) => queueDialog?.updateTask(job.jobId, Math.round(info.percent), info.stage, info.message),
           });

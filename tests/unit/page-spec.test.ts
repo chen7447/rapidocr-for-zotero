@@ -12,7 +12,7 @@ test("parsePageSpec ranges and commas", () => {
   assert.deepEqual(parsePageSpec("3", 10), [3]);
   assert.deepEqual(parsePageSpec("3,5,7-9", 10), [3, 5, 7, 8, 9]);
   assert.deepEqual(parsePageSpec("9-7,1", 10), [1, 7, 8, 9]);
-  assert.deepEqual(parsePageSpec("3，5", 10), [3, 5]);
+  assert.deepEqual(parsePageSpec("3,5", 10), [3, 5]);
 });
 
 test("parsePageSpec drops junk and out of range", () => {

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { PDFArray, PDFDocument, PDFName, PDFRawStream, PDFStream, StandardFonts, decodePDFRawStream, rgb } from "pdf-lib";
-import { addOcrLayerToPdf, overlayPlacement, restorePagesFromSource, splitFontRuns, stripAllOcrOverlays, stripOcrBlocks } from "../../src/ocr/pdf-builder";
+import { addOcrLayerToPdf, clipTextToRect, overlayPlacement, restorePagesFromSource, splitFontRuns, stripAllOcrOverlays, stripOcrBlocks } from "../../src/ocr/pdf-builder";
 import type { OCRPageResult, OCRResult } from "../../src/ocr/types";
 
 test("addOcrLayerToPdf scales boxes from pageWidthPoints, not a hardcoded DPI", async () => {
@@ -204,9 +204,62 @@ test("stripAllOcrOverlays with pageIndexes only drops those pages", async () => 
   assert.equal(pageHasOcrMark(outDoc, 1), false);
 });
 
+test("clipTextToRect keeps only the overlapping slice", () => {
+  assert.equal(clipTextToRect("ABCD", { x1: 0, x2: 100 }, { x1: 25, x2: 200 }), "BCD");
+  assert.equal(clipTextToRect("ABCD", { x1: 10, x2: 90 }, { x1: 0, x2: 100 }), "ABCD");
+  assert.equal(clipTextToRect("ABCD", { x1: 0, x2: 10 }, { x1: 50, x2: 80 }), "");
+});
+
 test("Helvetica encodes digits as WinAnsi, not Noto CID/PUA", async () => {
   const doc = await PDFDocument.create();
   const font = await doc.embedFont(StandardFonts.Helvetica);
   const hex = font.encodeText("0123456789").toString();
   assert.equal(hex, "<30313233343536373839>"); // ASCII '0'..'9'
+});
+
+test("b41: region mode is a line-level whitelist (行中心在圈内→整行写)", async () => {
+  const doc = await PDFDocument.create();
+  doc.addPage([200, 100]); // pt;渲染 2x → 400x200px
+  const originalPdf = await doc.save();
+  // 框(点,**PDF 原生坐标:页底原点,y 向上**,b53 实证 Zotero「选择区域」就这么存):
+  // [50,0~150,50] → 翻转(页高100pt)成"从页顶量"50~100 → px [100,100~300,200]
+  const regions = [{ pageIndex: 0, x1: 50, y1: 0, x2: 150, y2: 50 }];
+  const ocr: OCRResult = {
+    pages: [{
+      pageIndex: 0,
+      pageWidth: 400, pageHeight: 200,
+      pageWidthPoints: 200, pageHeightPoints: 100,
+      boxes: [
+        // 行中心(140,130) 在框内 → 整行写入,即使左右端伸出框边(b30 的"整行拒写"已废弃)
+        { points: [20, 120, 260, 120, 260, 140, 20, 140], raw: { x1: 20, y1: 120, x2: 260, y2: 140 }, score: 0.9, text: "Crossing line text" },
+        // 中心(65,30) 在框外 → 不得写入
+        { points: [40, 20, 90, 20, 90, 40, 40, 40], raw: { x1: 40, y1: 20, x2: 90, y2: 40 }, score: 0.9, text: "Outside row" },
+        // 完整在框内:px[120,120~280,140] ⊂ 框 px[100,100~300,200]
+        { points: [120, 120, 280, 120, 280, 140, 120, 140], raw: { x1: 120, y1: 120, x2: 280, y2: 140 }, score: 0.9, text: "Kept line" },
+      ],
+    }],
+  };
+  const output = await addOcrLayerToPdf(originalPdf, ocr, undefined, false, regions);
+  const outDoc = await PDFDocument.load(output);
+  const page = outDoc.getPages()[0];
+  const contents = page.node.Contents();
+  const ctx = page.node.context;
+  const streams = contents instanceof PDFArray
+    ? contents.asArray().map((r) => ctx.lookup(r))
+    : [contents];
+  let stream = "";
+  for (const s of streams) {
+    if (!(s instanceof PDFStream)) continue;
+    const bytes = s instanceof PDFRawStream ? decodePDFRawStream(s).decode() : s.getContents();
+    stream += new TextDecoder("latin1").decode(bytes);
+  }
+  const blocks = stream.match(/\/PdfOcrV3 BMC/g) ?? [];
+  assert.equal(blocks.length, 2, `expected 2 overlay blocks (kept + crossing), got ${blocks.length}`);
+  // b41:中心在圈内的行整行写入;中心在圈外的行整行不写;无裁剪路径算子;无字符裁
+  const hexOf = (s: string) => Buffer.from(s, "latin1").toString("hex").toUpperCase();
+  const streamUp = stream.toUpperCase();
+  assert.ok(streamUp.includes(hexOf("Kept line")), `kept line missing: ${stream.slice(0, 400)}`);
+  assert.ok(streamUp.includes(hexOf("Crossing")), `line centred in the frame must be written whole: ${stream.slice(0, 400)}`);
+  assert.ok(!streamUp.includes(hexOf("Outside")), "outside-row text must not be written");
+  assert.ok(!/\bW\s+n\b/.test(stream), "clip-path approach must be gone (pdf.js ignores it)");
 });

@@ -19,6 +19,7 @@ export type OcrRunSettings = {
   detMaxRotDeg: number;
   cropMode: number;
   ocrWorkers: number;
+  twoColumn: boolean;
 };
 
 /** Re-evaluated per open() so a locale change is picked up. */
@@ -82,6 +83,11 @@ const settingsHtml = () => `<!DOCTYPE html>
     </div>
   </div>
   <div class="row"><span class="lbl">${t("settings.workers")}</span><input type="number" id="s-workers" min="1" max="8" step="1"/></div>
+  <div class="row">
+    <label style="display:inline-flex;align-items:center;gap:6px;cursor:pointer;font-size:13px;color:#bac2de">
+      <input type="checkbox" id="s-twocol"/>${t("settings.twoColumn")}
+    </label>
+  </div>
   <div id="actions">
     <button id="s-cancel">${t("common.cancel")}</button>
     <button id="s-run" class="primary">${t("settings.run")}</button>
@@ -109,7 +115,7 @@ export function showOcrSettingsDialog(
       null,
       "about:blank",
       "ocr-pdf-settings",
-      "chrome,resizable,centerscreen,width=520,height=430",
+      "chrome,resizable,centerscreen,width=520,height=460",
       null,
     );
     if (!win) {
@@ -139,6 +145,8 @@ export function showOcrSettingsDialog(
     setNum("s-box", String(initial.detBoxThresh));
     setNum("s-maxrot", String(initial.detMaxRotDeg));
     setNum("s-workers", String(initial.ocrWorkers));
+    const twoCol = el("s-twocol");
+    if (twoCol) twoCol.checked = !!initial.twoColumn;
     const label = win.document.getElementById("file-label");
     if (label) label.textContent = fileLabel;
 
@@ -170,6 +178,7 @@ export function showOcrSettingsDialog(
         detMaxRotDeg: Math.round(num("s-maxrot", initial.detMaxRotDeg, 0, 90)),
         cropMode: Math.round(radio("s-crop", initial.cropMode)),
         ocrWorkers: Math.round(num("s-workers", initial.ocrWorkers, 1, 8)),
+        twoColumn: !!el("s-twocol")?.checked,
       });
     });
     el("s-cancel")?.addEventListener("click", () => finish(null));

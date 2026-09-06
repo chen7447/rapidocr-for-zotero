@@ -268,8 +268,8 @@ export interface DetPostprocessResult {
  * @param origW    Original image width (before resize).
  * @param origH    Original image height (before resize).
  * @param scaleX   X resize factor (resized / original). 与 scaleY 独立 —
- *                 因为 roundTo32 会使宽高的缩放不对称，用单一 scale 反向
- *                 缩放会造成垂直/水平错位（PaddleOCR 官方 ratio_w/ratio_h）。
+ *                 因为 roundTo32 会使宽高的缩放不对称,用单一 scale 反向
+ *                 缩放会造成垂直/水平错位(PaddleOCR 官方 ratio_w/ratio_h)].
  * @param scaleY   Y resize factor (resized / original).
  * @param options  Tuning parameters.
  */
@@ -290,9 +290,9 @@ export function detPostprocess(
      *  horizontal (diagonal watermarks / rotated stamps). PP-OCRv4 rec only
      *  reads horizontal text; these aren't content anyway — keep the layer clean. */
     maxRotDeg?: number;
-    /** 0=直立正文（1.7.2：AABB 框 + AABB 得分，无旋转过滤，worker 直接拷贝）
-     *  1=倾斜正文（minAreaRect + 旋转矫正裁剪）
-     *  2=复合方法（默认：近轴对齐走直接拷贝，真倾斜才拉正） */
+    /** 0=直立正文(1.7.2:AABB 框 + AABB 得分,无旋转过滤,worker 直接拷贝)
+     *  1=倾斜正文(minAreaRect + 旋转矫正裁剪)
+     *  2=复合方法(默认:近轴对齐走直接拷贝,真倾斜才拉正) */
     cropMode?: number;
   } = {},
 ): DetPostprocessResult {
@@ -340,7 +340,7 @@ export function detPostprocess(
     if (bbox.w < minSize || bbox.h < minSize) continue;
 
     if (cropMode === 0) {
-      // 1.7.2 直立正文：AABB 框 + AABB 得分 + 无旋转过滤（原版行为）
+      // 1.7.2 直立正文:AABB 框 + AABB 得分 + 无旋转过滤(原版行为)
       const score = boxScore(probMap, mapW, bbox);
       if (score < boxThresh) continue;
       const dist = (bbox.w * bbox.h * unclipRatio) / (2 * (bbox.w + bbox.h));
@@ -428,169 +428,232 @@ function boxIntersection(
   return Math.max(0, x2 - x1) * Math.max(0, y2 - y1);
 }
 
-type BoxLike = { raw: { x1: number; y1: number; x2: number; y2: number }; score: number };
+export type BoxLike = { raw: { x1: number; y1: number; x2: number; y2: number }; score: number };
 
 /**
  * After rec: drop fragments that sit inside a larger surviving box, then IoU-NMS.
  * Must run AFTER garbage text is removed — a formula parent that recoded as
  * 8888 is already gone, so ABn/ABt stay; a body line stays and eats its chips.
  */
-export function nmsBoxes<T extends BoxLike>(boxes: T[], contain = 0.7, iou = 0.5, pageWidth?: number): T[] {
-  const withoutChips = boxes.filter((child, i) => {
-    const cArea = boxArea(child.raw);
-    if (cArea <= 0) return false;
-    return !boxes.some((parent, j) => {
-      if (i === j) return false;
-      const pArea = boxArea(parent.raw);
-      if (pArea <= cArea) return false;
-      return boxIntersection(parent.raw, child.raw) / cArea >= contain;
-    });
-  });
-  const order = withoutChips.slice().sort((a, b) => b.score - a.score);
-  const kept: T[] = [];
-  for (const box of order) {
-    const a = boxArea(box.raw);
-    if (kept.some((k) => {
-      const inter = boxIntersection(box.raw, k.raw);
-      const u = a + boxArea(k.raw) - inter;
-      return u > 0 && inter / u >= iou;
-    })) continue;
-    kept.push(box);
-  }
-  return orderBoxes(kept, pageWidth);
+export function nmsBoxes<T extends BoxLike>(boxes: T[], contain = 0.7, iou =  0.5): T[] {
+	const withoutChips = boxes.filter((child, i) => {
+		const cArea = boxArea(child.raw);
+		if (cArea <=  0) return false;
+		return !boxes.some((parent, j) => {
+			if (i === j) return false;
+			const pArea = boxArea(parent.raw);
+			if (pArea <= cArea) return false;
+			return boxIntersection(parent.raw, child.raw) / cArea >= contain;
+		});
+	});
+	const order = withoutChips.slice().sort((a, b) => b.score - a.score);
+	const kept: T[] = [];
+	for (const box of order) {
+		const a = boxArea(box.raw);
+		if (kept.some((k) => {
+			const inter = boxIntersection(box.raw, k.raw);
+			const u = a + boxArea(k.raw) - inter;
+			return u >  0 && inter / u >= iou;
+		})) continue;
+		kept.push(box);
+	}
+	return readingOrder(kept);
 }
 
-// ─── column-aware page ordering ─────────────────────────────────────
-
-/** Full-wide threshold as a share of page width (titles/abstracts/spanning figures). */
-const FULL_WIDE_SHARE = 0.55;
-/** A blank vertical band must be at least this share of page width to count as a gutter.
- *  1.2% ≈ 14px @A4/144dpi — dense journal gutters measure only ~1.7-2.1% (实测 Springer
- *  排版 4-5mm 栏间距)；贯穿全部行高的连续细缝在单栏内几乎不存在，误判由显著性检查兜底。 */
-const GUTTER_MIN_SHARE = 0.012;
-/** Each side of a gutter needs at least this many boxes… */
-const GUTTER_MIN_BOXES = 3;
-/** …and at least this share of the non-full-wide boxes. */
-const GUTTER_MIN_SHARE_BOXES = 0.15;
-/** x 区间精确扫描（排序 + 单遍合并），无分桶量化误差——19px 的窄沟也能测出。 */
-/** More candidate columns than this → pathological, fall back to single column. */
-const MAX_COLUMNS = 3;
-
-/** 诊断输出：列检测的结果与回退原因（测试构建期无条件打印，正式版再收口）。 */
-export interface ColumnDiag {
-  reason: string;
-  cuts: number;
-  /** 实测的纵向空白带宽度（px，降序前几条） */
-  gaps: number[];
+/** Group boxes into text lines by y-overlap (≥50% of the smaller height). */
+function clusterByY<T extends BoxLike>(boxes: T[]): T[][] {
+	const sorted = boxes.slice().sort((a, b) => a.raw.y1 - b.raw.y1 || a.raw.x1 - b.raw.x1);
+	const lines: T[][] = [];
+	for (const box of sorted) {
+		const line = lines[lines.length - 1];
+		if (line) {
+			const ref = line[0];
+			const overlap = Math.min(box.raw.y2, ref.raw.y2) - Math.max(box.raw.y1, ref.raw.y1);
+			const minH = Math.min(box.raw.y2 - box.raw.y1, ref.raw.y2 - ref.raw.y1);
+			if (minH >  0 && overlap / minH >=  0.5) {
+				line.push(box);
+				continue;
+			}
+		}
+		lines.push([box]);
+	}
+	return lines;
 }
 
 /**
- * Page-level reading order with optional column detection.
- * 双栏页面按「左栏全部 → 右栏全部」排序；单栏与无法确定的情况走原
- * `readingOrder()`（单列语义）。检测是保守的：任何显著性/位置条件不满足
- * 都回退——最坏情况 = v1.9 行为，永不劣化。
+ * 圈内阅读顺序:先测「真实栏沟」再分堆,不靠页中线/宽度比例猜栏。
+ * 做法:块内框按 x 求并集,找最宽一段连续空白(≥ max(12px, 2×中位行高))当沟 —— 单栏块词间
+ * 只有几 px,测不到沟就原样 readingOrder。找沟时先丢掉宽度 >60% 块跨度的通栏框(它们会把沟
+ * 填平),分类时它们当分隔符:先冲刷左堆、再冲刷右堆,然后自己出。
+ * b45 实测:一个圈横跨两栏时输出逐行交错(左1 右1 左2 右2),这个函数治的就是它。
  */
-export function orderBoxes<T extends BoxLike>(boxes: T[], pageWidth?: number, diag?: ColumnDiag): T[] {
-  if (!pageWidth || pageWidth <= 0 || boxes.length < 8) {
-    if (diag) { diag.reason = "too-few-boxes-or-no-width"; diag.cuts = 0; diag.gaps = []; }
-    return readingOrder(boxes);
-  }
-  const groups = detectColumnGroups(boxes, pageWidth, diag);
-  if (!groups) return readingOrder(boxes);
-  if (diag) diag.reason = "ok";
-  const out: T[] = [];
-  for (const group of groups) out.push(...readingOrder(group));
-  return out;
+export function stackedOrder<T extends BoxLike>(boxes: T[]): T[] {
+	if (boxes.length < 3) return readingOrder(boxes);
+	const span = Math.max(...boxes.map((b) => b.raw.x2)) - Math.min(...boxes.map((b) => b.raw.x1));
+	if (span <= 0) return readingOrder(boxes);
+	const heights = boxes.map((b) => b.raw.y2 - b.raw.y1).sort((a, b) => a - b);
+	const minGap = Math.max(12, (heights[Math.floor(heights.length / 2)] || 1) * 2);
+	const merged: number[][] = [];
+	for (const b of boxes.filter((q) => q.raw.x2 - q.raw.x1 <= span * 0.6).sort((a, b) => a.raw.x1 - b.raw.x1)) {
+		const last = merged[merged.length - 1];
+		if (last && b.raw.x1 <= last[1]) last[1] = Math.max(last[1], b.raw.x2);
+		else merged.push([b.raw.x1, b.raw.x2]);
+	}
+	let gutter = -1;
+	let best = minGap;
+	for (let i = 1; i < merged.length; i++) {
+		const gap = merged[i][0] - merged[i - 1][1];
+		if (gap > best) { best = gap; gutter = (merged[i][0] + merged[i - 1][1]) / 2; }
+	}
+	if (gutter < 0) return readingOrder(boxes);
+	const out: T[] = [];
+	let lbuf: T[] = [];
+	let rbuf: T[] = [];
+	const flush = (): void => { out.push(...readingOrder(lbuf), ...readingOrder(rbuf)); lbuf = []; rbuf = []; };
+	for (const b of boxes.slice().sort((a, b) => a.raw.y1 - b.raw.y1)) {
+		if (b.raw.x2 <= gutter) lbuf.push(b);
+		else if (b.raw.x1 >= gutter) rbuf.push(b);
+		else { flush(); out.push(b); }
+	}
+	flush();
+	return out;
 }
 
 /**
- * Split page boxes into column groups, or null when the page does not
- * clearly look columnar. Full-wide boxes (titles/abstracts) are only kept
- * — as a leading group — when they all sit ABOVE the columnar body; any
- * mid-page spanning element means the layout is not a clean column grid.
+ * 圈与圈之间的阅读顺序:按 y 归带 → 带内自左而右,返回 rects 下标序(长度同 rects)。
+ * 旧写法直接按标注数组序输出 = 按「画框先后」,先画右下再画左上就把文字层整个顺序拧反。
+ * 归带分母用**本帧自身高度**,不能复用 clusterByY 的「较小高度」:手绘圈常从页眉一路拉到
+ * 摘要(b36 实测 F4 135~694 vs 页眉 F3 79~211),按较小高度会被并进页眉带,右栏摘要就抢在左栏前。
  */
-function detectColumnGroups<T extends BoxLike>(boxes: T[], pageWidth: number, diag?: ColumnDiag): T[][] | null {
-  const setDiag = (reason: string, cuts: number, gaps: number[]): void => {
-    if (diag) { diag.reason = reason; diag.cuts = cuts; diag.gaps = gaps; }
-  };
-  const fullWideLimit = FULL_WIDE_SHARE * pageWidth;
-  const fullWide: T[] = [];
-  const rest: T[] = [];
-  for (const b of boxes) {
-    (b.raw.x2 - b.raw.x1 >= fullWideLimit ? fullWide : rest).push(b);
-  }
-  if (rest.length < 6) {
-    setDiag("too-few-body-boxes", 0, []);
-    return null;
-  }
-
-  // Sort intervals by x1, sweep once to find vertical blank bands (exact, no quantization)
-  const sorted = rest.map((b) => [b.raw.x1, b.raw.x2] as [number, number]).sort((p, q) => p[0] - q[0]);
-  const minGapPx = GUTTER_MIN_SHARE * pageWidth;
-  const cuts: number[] = []; // midpoint of each detected gutter
-  const allGaps: number[] = [];
-  let contentStart = sorted[0][0];
-  let curEnd = sorted[0][1];
-  for (const [x1, x2] of sorted) {
-    const gap = x1 - curEnd;
-    if (gap > 0) allGaps.push(gap);
-    if (gap >= minGapPx) cuts.push((curEnd + x1) / 2);
-    if (x2 > curEnd) curEnd = x2;
-  }
-  const contentEnd = curEnd;
-  allGaps.sort((p, q) => q - p);
-  setDiag("pending", cuts.length, allGaps.slice(0, 4));
-  if (cuts.length < 1) { setDiag("no-gutter-widest-" + Math.round(allGaps[0] ?? 0) + "px", 0, allGaps.slice(0, 4)); return null; }
-  if (cuts.length > MAX_COLUMNS - 1) { setDiag("too-many-cuts", cuts.length, allGaps.slice(0, 4)); return null; }
-
-  const bounds: number[] = [contentStart, ...cuts, contentEnd];
-  const groups: T[][] = Array.from({ length: bounds.length - 1 }, () => []);
-  const minSide = Math.max(GUTTER_MIN_BOXES, Math.ceil(rest.length * GUTTER_MIN_SHARE_BOXES));
-  for (const b of rest) {
-    const cx = (b.raw.x1 + b.raw.x2) / 2;
-    let gi = 0;
-    while (gi < cuts.length && cx >= bounds[gi + 1]) gi++;
-    groups[gi].push(b);
-  }
-  if (groups.some((g) => g.length < minSide)) {
-    setDiag("weak-side", cuts.length, allGaps.slice(0, 4));
-    return null;
-  }
-
-  if (fullWide.length) {
-    const bodyTop = Math.min(...rest.map((b) => b.raw.y1));
-    if (!fullWide.every((b) => b.raw.y2 <= bodyTop)) {
-      setDiag("midpage-spanning-full-wide", cuts.length, allGaps.slice(0, 4));
-      return null;
-    }
-    setDiag("ok-with-fullwide-header", cuts.length, allGaps.slice(0, 4));
-    return [fullWide, ...groups];
-  }
-  return groups;
+export function frameReadingOrder(
+	rects: { x1: number; y1: number; x2: number; y2: number }[],
+): number[] {
+	const byTop = rects.map((_, i) => i).sort((a, b) => rects[a].y1 - rects[b].y1 || rects[a].x1 - rects[b].x1);
+	const bands: number[][] = [];
+	for (const i of byTop) {
+		const band = bands[bands.length - 1];
+		const ref = band ? rects[band[0]] : undefined;
+		const ov = ref ? Math.min(ref.y2, rects[i].y2) - Math.max(ref.y1, rects[i].y1) : -1;
+		if (band && ref && ov >= Math.max(1, rects[i].y2 - rects[i].y1) * 0.5) band.push(i);
+		else bands.push([i]);
+	}
+	return bands.map((b) => b.sort((x, y) => rects[x].x1 - rects[y].x1)).flat();
 }
 
 /** Top-to-bottom, then left-to-right within a line — PDF selection follows write order. */
 export function readingOrder<T extends BoxLike>(boxes: T[]): T[] {
-  const sorted = boxes.slice().sort((a, b) => a.raw.y1 - b.raw.y1 || a.raw.x1 - b.raw.x1);
-  const lines: T[][] = [];
-  for (const box of sorted) {
-    const line = lines[lines.length - 1];
-    if (line) {
-      const ref = line[0];
-      const overlap = Math.min(box.raw.y2, ref.raw.y2) - Math.max(box.raw.y1, ref.raw.y1);
-      const minH = Math.min(box.raw.y2 - box.raw.y1, ref.raw.y2 - ref.raw.y1);
-      if (minH > 0 && overlap / minH >= 0.5) {
-        line.push(box);
-        continue;
-      }
-    }
-    lines.push([box]);
-  }
-  for (const line of lines) line.sort((a, b) => a.raw.x1 - b.raw.x1);
-  return lines.flat();
+	const lines = clusterByY(boxes);
+	for (const line of lines) line.sort((a, b) => a.raw.x1 - b.raw.x1);
+	return lines.flat();
 }
 
-/** Fraction bars recode as 8888… — don't write those into the PDF. */
+/** 纵向定带:行中心落在帧的 y 范围内,上下各放宽**半个行高**(手绘圈的边常切在行中间,
+ * b46 实测 F3 底 1043 vs 行 1039~1048,中心只差 0.5px 就整行丢)。 */
+function lineInBand(
+	b: { raw: { x1: number; y1: number; x2: number; y2: number } },
+	r: { x1: number; y1: number; x2: number; y2: number },
+): boolean {
+	const cy = (b.raw.y1 + b.raw.y2) / 2;
+	const hy = Math.max(2, (b.raw.y2 - b.raw.y1) / 2);
+	return cy >= r.y1 - hy && cy <= r.y2 + hy;
+}
+
+/**
+ * 圈选白名单的唯一判定(engine 与 pdf-builder 共用)——**行级白名单,按覆盖长度算**:
+ * 所有圈在这一行上盖住的**长度 ≥ 整行的 50%** → 整行写入(两头允许超出圈边);否则整行不写。
+ * b41~b50 用的是「行中心在任一圈内」,它对**相邻两圈的中缝**无解:b50 实测 4 条页眉行
+ * (det#0/1/3/5)横跨 F4(右边界 594)与 F5(左边界 613),两个圈合计盖住 94% 的行,
+ * 中心却正好掉进那 19px 缝里 → 明明整行都在圈内却被判"圈外"。
+ * 纵向仍走 lineInBand,所以真没圈到的横缝(det#24/25/26/70/82/83)照旧一行不写。
+ * @returns 盖住这段行最多的圈下标;不足一半 -1。
+ */
+export function frameClaimingLine(
+	b: { raw: { x1: number; y1: number; x2: number; y2: number } },
+	rects: { x1: number; y1: number; x2: number; y2: number }[],
+): number {
+	const iv: number[][] = [];
+	let best = 0;
+	let at = -1;
+	rects.forEach((r, i) => {
+		if (!lineInBand(b, r)) return;
+		const s = Math.max(r.x1, b.raw.x1);
+		const e = Math.min(r.x2, b.raw.x2);
+		if (e <= s) return;
+		if (e - s > best) { best = e - s; at = i; }
+		iv.push([s, e]);
+	});
+	if (at < 0) return -1;
+	iv.sort((p, q) => p[0] - q[0]);
+	let covered = 0;
+	let end = -1;
+	for (const [s, e] of iv) {
+		if (s > end) covered += e - s;
+		else if (e > end) covered += e - end;
+		end = Math.max(end, e);
+	}
+	return covered / Math.max(1, b.raw.x2 - b.raw.x1) >= 0.5 ? at : -1;
+}
+
+/**
+ * rec 出的字符数明显撑不满框宽 = det 给的 quad 把这一行裁扁/裁歪了(b48 实测整页通道把
+ * "Article history:" 读成 "e:",同一框用 AABB 重 rec 就正常)。判据:len×2 < 框宽/行高。
+ * 英文小写正文实测约 1 字符占一个行高宽,掉到一半以下才算异常。
+ */
+export function lowDensityLine(b: {
+	raw: { x1: number; y1: number; x2: number; y2: number };
+	text?: string;
+}): boolean {
+	const h = Math.max(1, b.raw.y2 - b.raw.y1);
+	return (b.text || "").trim().length * 2 < (b.raw.x2 - b.raw.x1) / h;
+}
+
+/** 宽于此的框当通栏(标题/通栏图/满宽公式),不参与左右栏归类]. */
+const FULL_WIDE_SHARE =  0.55;
+
+/** 双栏阅读顺序(整页版):小框按中心 x 归左右栏,宽框当通栏。 */
+export function sortedLayoutBoxes<T extends BoxLike>(boxes: T[], pageWidth: number): T[] {
+	return splitRegion(boxes, 0, pageWidth);
+}
+
+/** 在 x∈[x1,x2] 范围内做双栏切分:小框按中心 x 在区间中线左右归栏;宽于此区间 55% 的框、或骑在中线上的框(居中的版权行/通栏短行/跨栏图表)当通栏,先冲左右栏再原地输出。 */
+function splitRegion<T extends BoxLike>(boxes: T[], x1: number, x2: number): T[] {
+	const sorted = boxes.slice().sort((a, b) => a.raw.y1 - b.raw.y1 || a.raw.x1 - b.raw.x1);
+	const out: T[] = [];
+	let left: T[] = [];
+	let right: T[] = [];
+	const flush = (): void => {
+		out.push(...readingOrder(left), ...readingOrder(right));
+		left = [];
+		right = [];
+	};
+	const mid = (x1 + x2) / 2;
+	const fullWide = FULL_WIDE_SHARE * (x2 - x1);
+	for (const b of sorted) {
+		const { x1: bx1, x2: bx2 } = b.raw;
+		// 跨中线且"骑在中线上"(居中≤5% 区间宽)才算通栏:版权行/居中短标题/跨栏图表。
+		// 只跨一点点的非对称栏(如摘要 37/63 的右栏)仍按中心 x 归栏,否则会被当通栏与左栏逐行交错。
+		// ponytail: 中线取区间几何中点,分栏严重偏心时仍靠中心 x 归类兜住;真要精细就逐带投票找 gutter。
+		const straddle = bx1 < mid && bx2 > mid && Math.abs((bx1 + bx2) / 2 - mid) <= 0.05 * (x2 - x1);
+		if (bx2 - bx1 >= fullWide || straddle) {
+			flush();
+			out.push(b);
+		} else {
+			((bx1 + bx2) / 2 < mid ? left : right).push(b);
+		}
+	}
+	flush();
+	return out;
+}
+
+/**
+ * Default = RapidOCR/Paddle `sorted_boxes` (Y then X via readingOrder).
+ * `twoColumn` = 双栏阅读顺序(先左栏后右栏)].Off unless the user asks..
+ */
+export function orderBoxes<T extends BoxLike>(boxes: T[], pageWidth?: number, twoColumn = false): T[] {
+	if (twoColumn && pageWidth && pageWidth >  0) return sortedLayoutBoxes(boxes, pageWidth);
+	return readingOrder(boxes);
+}
+
 export function isGarbageText(text: string): boolean {
   const t = text.trim();
   if (!t) return true;

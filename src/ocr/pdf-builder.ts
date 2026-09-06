@@ -27,7 +27,8 @@ import {
 } from "pdf-lib";
 import fontkit from "@pdf-lib/fontkit";
 import { OCRResult } from "./types";
-import { orderBoxes } from "./postprocess";
+import { frameClaimingLine, orderBoxes } from "./postprocess";
+import { debugLog } from "../debug-log";
 
 /** Marked-content tag wrapping our overlay so a later pass can drop it. */
 export const OCR_MARK = "PdfOcrV3";
@@ -39,6 +40,21 @@ export type OverlayFont = {
 };
 
 export type FontRun = { latin: boolean; text: string };
+
+/** Slice `text` to the horizontal overlap of `raw` with `rect` (uniform glyph pitch). */
+export function clipTextToRect(
+  text: string,
+  raw: { x1: number; x2: number },
+  rect: { x1: number; x2: number },
+): string {
+  const w = raw.x2 - raw.x1;
+  if (w < 1 || !text) return "";
+  const a = Math.max(0, Math.min(1, (Math.max(raw.x1, rect.x1) - raw.x1) / w));
+  const b = Math.max(0, Math.min(1, (Math.min(raw.x2, rect.x2) - raw.x1) / w));
+  if (b <= a) return "";
+  const chars = [...text];
+  return chars.slice(Math.round(a * chars.length), Math.round(b * chars.length)).join("").trim();
+}
 
 /** ASCII → Helvetica; everything else → CJK. */
 export function splitFontRuns(text: string): FontRun[] {
@@ -113,6 +129,8 @@ export async function addOcrLayerToPdf(
   originalPdf: Uint8Array,
   ocr: OCRResult,
   fontBytes?: Uint8Array,
+  twoColumn = false,
+  regions?: Array<{ pageIndex: number; x1: number; y1: number; x2: number; y2: number }>,
 ): Promise<Uint8Array> {
   const doc = await PDFDocument.load(originalPdf);
   doc.registerFontkit(fontkit);
@@ -131,7 +149,16 @@ export async function addOcrLayerToPdf(
 
   const n = doc.getPageCount();
   const replace = new Set(ocr.pages.map((p) => p.pageIndex).filter((i) => i >= 0 && i < n));
-  for (const pi of replace) stripOcrOverlay(doc.getPages()[pi]);
+  let foundBlocks = 0;
+  let strippedPages = 0;
+  for (const pi of replace) {
+    const found = stripOcrOverlay(doc.getPages()[pi]);
+    if (found > 0) strippedPages++;
+    foundBlocks += found;
+  }
+  try {
+    debugLog.log(`pdf-builder: prior layer found=${foundBlocks} blocks pages=${strippedPages}/${replace.size}`);
+  } catch { /* diag only */ }
 
   for (const pageResult of ocr.pages) {
     const pi = pageResult.pageIndex;
@@ -142,25 +169,58 @@ export async function addOcrLayerToPdf(
       ? (pageResult.pageWidthPoints || pw) / pageResult.pageWidth
       : 0.5;
 
-    // 诊断（测试构建期无条件打印）：该页最终用了列排序还是单列排序、为什么
-    const diag: import("./postprocess").ColumnDiag = { reason: "", cuts: 0, gaps: [] };
-    const orderedBoxes = orderBoxes(pageResult.boxes, pageResult.pageWidth, diag);
+    // 框=版面块:engine 已按块序排好(块内纯阅读顺序、框外残段在后),这里直接采用,
+    // 不再按中心点二次归组(框边界处会归错组,正是前几版粘连的嫌疑)。
+    // 分栏归组只在用户勾「双栏版面」时发生(见 orderBoxes);圈选模式不再猜栏。
+    const hasRegions = (regions ?? []).some((r) => r.pageIndex === pageResult.pageIndex);
+    const orderedBoxes = hasRegions
+      ? pageResult.boxes
+      : orderBoxes(pageResult.boxes, pageResult.pageWidth, twoColumn);
+    // X2 框外物理裁剪:统一把点单位框换算成像素框,供转储与写层裁剪共用
+    const pagePxRects = hasRegions
+      ? (regions ?? []).filter((r) => r.pageIndex === pageResult.pageIndex)
+          .map((r) => {
+            const scX = pageResult.pageWidth / (pageResult.pageWidthPoints || pw);
+            const scY = pageResult.pageHeight / (pageResult.pageHeightPoints || ph);
+            // 标注 y 是页底原点(PDF 原生,见 ocr-engine b53 注):像素从页顶量 → 翻转
+            const Hpt = pageResult.pageHeightPoints || ph || 1;
+            return { x1: r.x1 * scX, y1: (Hpt - r.y2) * scY, x2: r.x2 * scX, y2: (Hpt - r.y1) * scY };
+          })
+      : [];
     try {
-      let reordered = false;
-      for (let i = 0; i < orderedBoxes.length; i++) {
-        if (orderedBoxes[i] !== pageResult.boxes[i]) { reordered = true; break; }
-      }
-      Zotero.debug(`PDF OCR v3: page ${pi + 1} build ${addonVersion} — ${reordered ? "column-aware order" : "single-column order"} (reason=${diag.reason}, cuts=${diag.cuts}, gapsPx=[${diag.gaps.map((g) => Math.round(g)).join(",")}], boxes=${pageResult.boxes.length}, pageW=${Math.round(pageResult.pageWidth)})`);
+      const s = `PDF OCR v3: page ${pi + 1} build ${addonVersion} — ${hasRegions ? "region" : twoColumn ? "two-column" : "single-column"} order (boxes=${pageResult.boxes.length}, pageW=${Math.round(pageResult.pageWidth)})`;
+      debugLog.log(s);
+      Zotero.debug(s);
     } catch { /* diag only */ }
+    // 写入序逐行转储:ground truth。F#=基本落在哪个框;跨界行 engine 已剔除。
+    // 框内判定与 engine 共用 frameClaimingLine(被圈盖住≥半行才算,纵向容差=行高一半)。
+    if (hasRegions) {
+      try {
+        let line = 0;
+        for (const b of orderedBoxes) {
+          const full = (b.text || "").trim();
+          if (!full) continue;
+          const fi = frameClaimingLine(b, pagePxRects);
+          if (fi < 0) continue;
+          const tag = `write#${String(line++).padStart(3, "0")} [F${fi}]`;
+          debugLog.log(`${tag} ${JSON.stringify(full.slice(0, 46))}`);
+        }
+      } catch { /* diag only */ }
+    }
     for (const box of orderedBoxes) {
       const text = box.text.trim();
       if (!text) continue;
 
+      // b31 完整行白名单(出血容差):engine 已过滤;此处兜底拒绝跨界行。
+      // 不做字符硬裁(半词垃圾根源),不做裁剪路径(pdf.js 无视 W)。
+      if (hasRegions && frameClaimingLine(box, pagePxRects) < 0) continue;
+      const layoutRaw = box.raw;
+
       const runs = splitFontRuns(text);
       const heightFont = runs.some((r) => !r.latin) ? cjkFont : latinFont;
-      const fontSize = Math.max(heightFont.sizeAtHeight(Math.max((box.raw.y2 - box.raw.y1) * pixelToPoint, 1)), 1);
+      const fontSize = Math.max(heightFont.sizeAtHeight(Math.max((layoutRaw.y2 - layoutRaw.y1) * pixelToPoint, 1)), 1);
       const textWidth = runWidth(runs, latinFont, cjkFont, fontSize);
-      const place = overlayPlacementForWidth(box.raw, pixelToPoint, ph, heightFont, textWidth);
+      const place = overlayPlacementForWidth(layoutRaw, pixelToPoint, ph, heightFont, textWidth);
       if (!place) continue;
 
       page.pushOperators(
@@ -195,12 +255,13 @@ function decodeStreamBytes(stream: PDFStream): Uint8Array {
 const OCR_BMC_RE = /\/PdfOcrV3\s+BMC\b/g;
 const MARKED_OP = /\/[^\s]+?\s+BMC\b|\bBDC\b|\bEMC\b/g;
 
-/** Cut `/PdfOcrV3 BMC` … matching `EMC`, including nested `/Tx BMC`. */
-export function stripOcrBlocks(text: string): { text: string; stripped: boolean } {
+/** Cut `/PdfOcrV3 BMC` … matching `EMC`, including nested `/Tx BMC`. Returns found count. */
+export function stripOcrBlocks(text: string): { text: string; stripped: boolean; found: number } {
   OCR_BMC_RE.lastIndex = 0;
-  if (!OCR_BMC_RE.test(text)) return { text, stripped: false };
+  if (!OCR_BMC_RE.test(text)) return { text, stripped: false, found: 0 };
   let out = "";
   let i = 0;
+  let found = 0;
   OCR_BMC_RE.lastIndex = 0;
   let m: RegExpExecArray | null;
   while ((m = OCR_BMC_RE.exec(text))) {
@@ -208,9 +269,10 @@ export function stripOcrBlocks(text: string): { text: string; stripped: boolean 
     out += text.slice(i, m.index);
     i = skipMarkedContent(text, m.index);
     OCR_BMC_RE.lastIndex = i;
+    found++;
   }
   out += text.slice(i);
-  return { text: out, stripped: true };
+  return { text: out, stripped: true, found };
 }
 
 function skipMarkedContent(text: string, startAt: number): number {
@@ -274,13 +336,14 @@ export async function restorePagesFromSource(
   return { bytes: await dest.save(), pagesRestored: targets.length };
 }
 
-/** Drop tagged overlay operators, including when they sit inside a merged stream. */
-export function stripOcrOverlay(page: PDFPage): boolean {
+/** Drop tagged overlay operators, including when they sit inside a merged stream. Returns found block count. */
+export function stripOcrOverlay(page: PDFPage): number {
   const items = contentItems(page);
-  if (!items.length) return false;
+  if (!items.length) return 0;
   const ctx = page.node.context;
   const next = PDFArray.withContext(ctx);
   let changed = false;
+  let totalFound = 0;
   for (const item of items) {
     const stream = item instanceof PDFRef ? ctx.lookup(item) : item;
     if (!(stream instanceof PDFStream)) {
@@ -288,16 +351,17 @@ export function stripOcrOverlay(page: PDFPage): boolean {
       continue;
     }
     const decoded = new TextDecoder("latin1").decode(decodeStreamBytes(stream));
-    const { text, stripped } = stripOcrBlocks(decoded);
+    const { text, stripped, found } = stripOcrBlocks(decoded);
     if (!stripped) {
       next.push(item instanceof PDFRef ? item : (ctx.getObjectRef(stream) || ctx.register(stream)));
       continue;
     }
     changed = true;
+    totalFound += found;
     if (!text.trim()) continue;
     next.push(ctx.register(ctx.stream(new TextEncoder().encode(text))));
   }
-  if (!changed) return false;
+  if (!changed) return 0;
   page.node.set(PDFName.of("Contents"), next);
-  return true;
+  return totalFound;
 }

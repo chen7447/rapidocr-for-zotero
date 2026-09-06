@@ -81,7 +81,7 @@ export interface DetPreprocessResult {
    *  batch dimension: [1, 3, H, W].  H and W are the resized dimensions. */
   tensor: Float32Array;
   /** X-axis resize factor (resized / original). 独立于 scaleY — roundTo32
-   *  会让宽高的缩放比例不同，单一 scale 反向缩放会造成坐标错位。 */
+   *  会让宽高的缩放比例不同,单一 scale 反向缩放会造成坐标错位。 */
   scaleX: number;
   /** Y-axis resize factor (resized / original). */
   scaleY: number;
@@ -98,7 +98,7 @@ export interface DetPreprocessResult {
  * @param width   Original image width.
  * @param height  Original image height.
  * @param limitSideLen  Long-side limit (default 1536). 若长边超过此值则等比缩小
- *                      到长边 = limitSideLen（PaddleOCR DetResizeForTest 语义）。
+ *                      到长边 = limitSideLen(PaddleOCR DetResizeForTest 语义)。
  * @returns       A Float32Array tensor ready for the det model, plus
  *                metadata needed to rescale output boxes back to original
  *                coordinates.

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { isGarbageText, nmsBoxes, orderBoxes, readingOrder, type BoxLike, type DetBox } from "../../src/ocr/postprocess";
+import { frameClaimingLine, frameReadingOrder, isGarbageText, lowDensityLine, nmsBoxes, orderBoxes, readingOrder, stackedOrder, type BoxLike, type DetBox } from "../../src/ocr/postprocess";
 
 function box(id: string, x1: number, y1: number, x2: number, y2: number, score = 0.9): DetBox {
   return {
@@ -61,74 +61,123 @@ function colBoxes(x1: number, x2: number, rows: number, y0 = 120): BoxLike[] {
   return out;
 }
 
-test("orderBoxes splits two columns: left column fully, then right", () => {
-  const left = colBoxes(80, 520, 10);
-  const right = colBoxes(680, 1120, 10);
-  const boxes = [];
-  for (let r = 0; r < 10; r++) { boxes.push(left[r], right[r]); } // 同一基线交错入列
-  const out = orderBoxes(boxes, PAGE);
-  assert.equal(out.length, 20);
-  for (let i = 0; i < 10; i++) assert.ok(out[i].raw.x1 < 600, 'first half must be left column');
-  for (let i = 10; i < 20; i++) assert.ok(out[i].raw.x1 > 600, 'second half must be right column');
-  for (let i = 1; i < 10; i++) assert.ok(out[i].raw.y1 > out[i - 1].raw.y1);
-  for (let i = 11; i < 20; i++) assert.ok(out[i].raw.y1 > out[i - 1].raw.y1);
-});
+function interleave(left: BoxLike[], right: BoxLike[]): BoxLike[] {
+  const boxes: BoxLike[] = [];
+  for (let r =  0; r < left.length; r++) boxes.push(left[r], right[r]);
+  return boxes;
+}
 
-test("orderBoxes single-column page equals plain readingOrder (regression)", () => {
-  const boxes = colBoxes(80, 520, 12);
-  const got = orderBoxes(boxes, PAGE).map((b) => b.raw);
-  const want = readingOrder(boxes).map((b) => b.raw);
+test("orderBoxes default (twoColumn off) equals readingOrder", () => {
+  const boxes = interleave(colBoxes(80,  520,  10), colBoxes(680,  1120,  10));
+  const got = orderBoxes(boxes, PAGE)
+  const want = readingOrder(boxes);
   assert.deepEqual(got, want);
 });
-
-test("orderBoxes puts a full-wide title before the two-column body", () => {
-  const title = box('title', 80, 40, 1120, 80);
-  const left = colBoxes(80, 520, 10);
-  const right = colBoxes(680, 1120, 10);
-  const boxes = [title, ...left, ...right];
-  const out = orderBoxes(boxes, PAGE);
-  assert.equal(out[0], title);
-  for (let i = 1; i <= 10; i++) assert.ok(out[i].raw.x1 < 600);
-  for (let i = 11; i < 20; i++) assert.ok(out[i].raw.x1 > 600);
+test("orderBoxes twoColumn splits: left column fully, then right", () => {
+  const left = colBoxes(80,  520,  10);
+  const right = colBoxes(680,  1120,  10);
+  const out = orderBoxes(interleave(left, right), PAGE, true);
+  assert.equal(out.length,  20);
+  for (let i =   0; i <   10; i++) assert.ok(out[i].raw.x1 <   600);
+  for (let i =   10; i <   20; i++) assert.ok(out[i].raw.x1 >   600);
 });
 
-test("orderBoxes falls back to single column for a mid-page spanning figure", () => {
-  const fig = box('fig', 100, 400, 1100, 500);
-  const left = colBoxes(80, 520, 10);
-  const right = colBoxes(680, 1120, 10);
-  const boxes = [fig, ...left, ...right];
-  const got = orderBoxes(boxes, PAGE).map((b) => b.raw);
-  const want = readingOrder(boxes).map((b) => b.raw);
-  assert.deepEqual(got, want);
+test("orderBoxes twoColumn keeps a wide table in the left column", () => {
+  const table = colBoxes(40,   560,   6,   100);
+  const para = colBoxes(640,   1120,   6,   100);
+  const out = orderBoxes(interleave(table, para), PAGE, true);
+  assert.equal(out.length,   12);
+  for (const b of table) assert.ok(out.indexOf(b) <   6);
+  for (const b of para) assert.ok(out.indexOf(b) >=   6);
 });
 
-test("orderBoxes handles three columns", () => {
-  const boxes = [...colBoxes(80, 360, 8), ...colBoxes(460, 740, 8), ...colBoxes(840, 1120, 8)];
-  const out = orderBoxes(boxes, PAGE);
-  assert.equal(out.length, 24);
-  for (let i = 0; i < 8; i++) assert.ok(out[i].raw.x1 < 400);
-  for (let i = 8; i < 16; i++) assert.ok(out[i].raw.x1 > 400 && out[i].raw.x1 < 800);
-  for (let i = 16; i < 24; i++) assert.ok(out[i].raw.x1 > 800);
+test("frameClaimingLine: 按被圈盖住的长度判定,相邻两圈的中缝不再吃掉整行", () => {
+  const rects = [{ x1: 65, y1: 82, x2: 594, y2: 693 }, { x1: 613, y1: 133, x2: 1146, y2: 694 }]; // F4 | F5
+  // b50 实测 det#1 458,152~763,160:F4 盖 136px + F5 盖 150px = 整行 94%,而中心 610 掉进 19px 中缝
+  assert.equal(frameClaimingLine(box("head", 458, 152, 763, 160), rects), 1); // 归盖得最多的 F5
+  assert.equal(frameClaimingLine(box("title", 95, 363, 903, 375), rects), 0); // F4 盖 499 > F5 盖 290
+  // det#0 457,98~758,108 在 F5 顶边(133)之上,只有 F4 盖 46% → 仍不写(纵向没被两个圈同时盖住)
+  assert.equal(frameClaimingLine(box("top", 457, 98, 758, 108), rects), -1);
+  // 真没圈到的横缝(b48 det#26 420,716~1125,726:697~732 之间没有圈)→ 不写
+  assert.equal(frameClaimingLine(box("seam", 420, 716, 1125, 726), rects), -1);
+  assert.equal(frameClaimingLine(box("outside", 1160, 300, 1300, 312), rects), -1);
+  // b41 语义保留:端点出血无所谓,中心出圈但只盖住 33% 的行不写(b47 半行高纵向容差也在)
+  const one = [{ x1: 0, y1: 0, x2: 1000, y2: 2200 }];
+  assert.equal(frameClaimingLine(box("out-sticking", 200, 100, 1150, 160), one), 0);
+  assert.equal(frameClaimingLine(box("mostly-out", 850, 100, 1300, 160), one), -1);
+  assert.equal(frameClaimingLine(box("below", 700, 700, 900, 712), rects), -1);
+  const f3 = [{ x1: 388, y1: 734, x2: 1133, y2: 1043 }];
+  assert.equal(frameClaimingLine(box("last-line", 630, 1039, 1124, 1048), f3), 0);
+  assert.equal(frameClaimingLine(box("one-line-below", 630, 1050, 1124, 1059), f3), -1);
 });
 
-test("nmsBoxes without pageWidth keeps the plain readingOrder behavior", () => {
-  const boxes = colBoxes(80, 520, 10).concat(colBoxes(680, 1120, 10));
-  const got = nmsBoxes(boxes).map((b) => b.raw);
-  const want = readingOrder(boxes).map((b) => b.raw);
-  assert.deepEqual(got, want);
+test("twoColumn Elsevier first page: full-width header, then left column, then right", () => {
+  // 版面实测(j.lwt.2013.11.010 首页):标题/作者/单位/摘要/版权通栏,正文双栏
+  const title = box("z1", 120, 80, 1080, 280);
+  const authors = box("z2", 120, 300, 1080, 380);
+  const affil = box("z3", 120, 400, 1080, 480);
+  const absLabel = box("z4a", 120, 500, 300, 540);
+  const abs1 = box("z4b", 120, 560, 1080, 760);
+  const abs2 = box("z4c", 120, 770, 1080, 800);
+  const cop = box("z5", 420, 810, 780, 840);
+  const left = colBoxes(60, 552, 4, 900);
+  const right = colBoxes(648, 1140, 4, 900);
+  const out = orderBoxes([cop, ...interleave(left, right), abs2, title, abs1, affil, authors, absLabel], PAGE, true);
+  const key = (b: BoxLike): number => b.raw.y1 * 1000 + b.raw.x1;
+  assert.deepEqual(out.map(key), [title, authors, affil, absLabel, abs1, abs2, cop, ...left, ...right].map(key));
 });
 
-test("orderBoxes splits a dense two-column page with a ~1.8% gutter (实测回归)", () => {
-  // 复刻用户实测的 Springer 紧凑排版：页宽 1190，左栏 33-563，右栏 582-1153，
-  // 沟宽约 21px（1.76% 页宽）——旧阈值 3.5% 判不出，1.2% 必须切列
-  const left = colBoxes(33, 563, 8, 100);
-  const right = colBoxes(582, 1153, 8, 100);
-  const boxes = [];
-  for (let r = 0; r < 8; r++) { boxes.push(left[r], right[r]); }
-  const out = orderBoxes(boxes, 1190);
-  assert.equal(out.length, 16);
-  for (let i = 0; i < 8; i++) assert.ok(out[i].raw.x1 < 575, 'first half must be left column');
-  for (let i = 8; i < 16; i++) assert.ok(out[i].raw.x1 > 575, 'second half must be right column');
-  for (let i = 1; i < 8; i++) assert.ok(out[i].raw.y1 > out[i - 1].raw.y1);
-  for (let i = 9; i < 16; i++) assert.ok(out[i].raw.y1 > out[i - 1].raw.y1);
+test("twoColumn keeps an asymmetric 37/63 abstract block as two columns, not interleaved", () => {
+  // 摘要区左子栏 10%~37%、右子栏 37%~90%:右栏横跨页中线但不是通栏,不得逐行与左栏交错
+  const left = [box("l1", 120, 500, 420, 540), box("l2", 120, 550, 440, 590)];
+  const right = [box("r1", 460, 500, 1080, 540), box("r2", 460, 550, 1060, 590), box("r3", 460, 600, 1080, 640)];
+  const out = orderBoxes([...right, ...left], PAGE, true);
+  const key = (b: BoxLike): number => b.raw.y1 * 1000 + b.raw.x1;
+  assert.deepEqual(out.map(key), [...left, ...right].map(key));
+});
+
+test("frameReadingOrder: 圈按版面 y→x 排,不按画框先后", () => {
+  // b36 实测的 5 个圈(px):页眉 F3 / 左摘要 F2 / 右摘要 F4(从封面拉到摘要) / 左栏 F0 / 右栏 F1
+  const rects = [
+    { x1: 79, y1: 768, x2: 369, y2: 1048 }, // F0 左栏
+    { x1: 392, y1: 742, x2: 1139, y2: 1041 }, // F1 右栏
+    { x1: 53, y1: 228, x2: 602, y2: 705 }, // F2 左摘要
+    { x1: 57, y1: 79, x2: 603, y2: 211 }, // F3 页眉
+    { x1: 618, y1: 135, x2: 1154, y2: 694 }, // F4 右摘要+封面
+  ];
+  assert.deepEqual(frameReadingOrder(rects), [3, 2, 4, 0, 1]); // 页眉 → 左摘要 → 右摘要 → 左栏 → 右栏
+  // 先画右栏再画左栏,也得左栏在前
+  assert.deepEqual(
+    frameReadingOrder([{ x1: 392, y1: 742, x2: 1139, y2: 1041 }, { x1: 79, y1: 768, x2: 369, y2: 1048 }]),
+    [1, 0],
+  );
+});
+
+test("stackedOrder: 圈内跨栏的两堆先读左堆再读右堆,不再逐行交错", () => {
+  const key = (b: BoxLike): string => `${b.raw.x1},${b.raw.y1}`;
+  // b45 实测 F3 圈(70,1064~961,1244)横跨两栏:原先出成 左1 右1 左2 右2
+  const twoCol = [
+    box("l1", 91, 1060, 584, 1069), box("r1", 630, 1060, 1123, 1070),
+    box("l2", 91, 1081, 582, 1090), box("r2", 629, 1081, 1123, 1090),
+  ];
+  assert.deepEqual(stackedOrder(twoCol).map(key), ["91,1060", "91,1081", "630,1060", "629,1081"]);
+  // 单栏块(框宽≈块跨度,测不到栏沟)→ 保持 readingOrder 的 y→x
+  const oneCol = [
+    box("a", 115, 955, 584, 965), box("b", 91, 977, 583, 986),
+    box("c", 91, 997, 584, 1006), box("d", 91, 1018, 584, 1028),
+  ];
+  assert.deepEqual(stackedOrder(oneCol).map((b) => b.raw.y1), [955, 977, 997, 1018]);
+  // 37/63 子栏 + 通栏行:通栏行当分隔符先出,然后左子栏整堆、右子栏整堆(b45 F4 实测)
+  const mixed = [box("wide", 95, 363, 903, 375), box("info", 89, 562, 274, 570), box("abs", 418, 562, 548, 570), box("affil", 90, 497, 315, 506)];
+  assert.deepEqual(stackedOrder(mixed).map(key), ["95,363", "90,497", "89,562", "418,562"]);
+});
+
+test("lowDensityLine: 只对「字符数撑不满框宽」的行走 AABB 补读", () => {
+  const b = (x1: number, y1: number, x2: number, y2: number, text: string) => ({ raw: { x1, y1, x2, y2 }, text });
+  assert.ok(lowDensityLine(b(90, 600, 169, 610, "e:"))); // b48 实测:整页通道只读出 "e:"
+  assert.ok(!lowDensityLine(b(90, 600, 169, 610, "Article history:"))); // 补读后的正确文本
+  assert.ok(!lowDensityLine(b(91, 913, 207, 922, "1.Introduction"))); // 短而正常的行
+  assert.ok(!lowDensityLine(b(629, 1164, 668, 1173, "2010).")));
+  assert.ok(!lowDensityLine(b(95, 363, 903, 375, "Purification,preliminarystructuralcharacterizationandinvitro")));
+  assert.ok(lowDensityLine(b(113, 1407, 584, 1416, ""))); // rec 交白卷 → 同样走补读捞回
 });

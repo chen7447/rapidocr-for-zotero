@@ -143,7 +143,7 @@ export class OcrProgressDialog {
 
     this.win = win;
 
-    // 计时器(2)：总用时，从打开对话框/开始解析 PDF 起算
+    // 计时器(2):总用时,从打开对话框/开始解析 PDF 起算
     this._startTotalTimer();
 
     // If the user closes the window manually, treat as cancel
@@ -173,7 +173,7 @@ export class OcrProgressDialog {
   updateProgress(percent: number, stage?: string, command?: string): void {
     const w = this.win;
     if (!w) return;
-    // 计时器(1)：纯 OCR 时间，从「已分配 n 核数」起算
+    // 计时器(1):纯 OCR 时间,从「已分配 n 核数」起算
     if (stage === "alloc") this._startOcrTimer();
     const bar = w.document.getElementById("progress-bar") as HTMLProgressElement | null;
     const pct = w.document.getElementById("progress-text");

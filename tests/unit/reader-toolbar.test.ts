@@ -3,6 +3,7 @@ import test from "node:test";
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { regionBBox } from "../../src/ui/reader-toolbar";
 
 const src = readFileSync(
   join(dirname(fileURLToPath(import.meta.url)), "../../src/ui/reader-toolbar.ts"),
@@ -27,4 +28,13 @@ test("strip OCR closes reader, shows progress, then reopens", () => {
   assert.match(hooks, /reopen after strip/);
   assert.match(hooks, /reopen after page OCR/);
   assert.doesNotMatch(hooks, /reader\?\.navigate/);
+});
+
+test("regionBBox covers real Zotero ink and rect shapes", () => {
+  const ink = regionBBox({ paths: [{ lines: [[10, 20, 30, 40]], points: [[5, 60]] }] });
+  assert.deepEqual(ink, { x1: 5, y1: 20, x2: 30, y2: 60 });
+  const rect = regionBBox({ rects: [[100, 50, 300, 90]] });
+  assert.deepEqual(rect, { x1: 100, y1: 50, x2: 300, y2: 90 });
+  assert.equal(regionBBox({}), null);
+  assert.equal(regionBBox(undefined), null);
 });

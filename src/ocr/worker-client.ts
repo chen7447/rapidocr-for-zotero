@@ -26,7 +26,7 @@ export class WorkerClient {
     number,
     { resolve: (boxes: OCRBox[]) => void; reject: (err: Error) => void }
   >();
-  /** 单页并行流程（det/recBatch）用自增 id 做请求-响应匹配。 */
+  /** 单页并行流程(det/recBatch)用自增 id 做请求-响应匹配。 */
   private seq = 0;
   private pendingSeq = new Map<
     number,

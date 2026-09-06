@@ -3,6 +3,7 @@ import {
   SelectionResolution,
   SelectionResolver,
 } from "../zotero/selection-resolver";
+import { debugLog } from "../debug-log";
 
 export const CONTEXT_MENU_ID = "pdf-ocr-for-zotero-create-searchable-pdf";
 export const PLUGIN_ID = "pdfocrforzotero@example.com";
@@ -70,7 +71,9 @@ export class ContextMenuController {
               } catch (err) {
                 try {
                   const msg = err instanceof Error ? err.message : String(err);
-                  Zotero.debug(`PDF OCR: menu command error: ${msg}`);
+                  const s = `PDF OCR: menu command error: ${msg}`;
+                  debugLog.log(s);
+                  Zotero.debug(s);
                 } catch {
                   // ignore logging errors too
                 }

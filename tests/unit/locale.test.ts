@@ -26,7 +26,7 @@ test("t() falls back to English when no Zotero global is present", () => {
 test("t() uses the zh-CN table for zh* locales and interpolates args", () => {
   const saved = (globalThis as TestGlobal).Zotero;
   setZotero("zh-CN");
-  assert.equal(t("hooks.skipped", { n: 2 }), "2 个附件已在队列中，已跳过。");
+  assert.equal(t("hooks.skipped", { n: 2 }), "2 个附件已在队列中,已跳过。");
   assert.equal(t("hooks.done", { n: 12 }), "OCR 完成 — 12 个文本框");
   setZotero("en-US");
   assert.equal(t("hooks.done", { n: 12 }), "OCR complete — 12 text box(es)");

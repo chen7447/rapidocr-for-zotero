@@ -5,7 +5,7 @@
 export function parsePageSpec(spec: string, pageCount: number, currentPage = 1): number[] {
   const n = pageCount | 0;
   const raw = spec.trim();
-  const tokens = raw ? raw.split(/[,，\s]+/).filter(Boolean) : [String(currentPage)];
+  const tokens = raw ? raw.split(/[,,\s]+/).filter(Boolean) : [String(currentPage)];
   const seen = new Set<number>();
   const out: number[] = [];
   for (const token of tokens) {

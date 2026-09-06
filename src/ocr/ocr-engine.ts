@@ -146,12 +146,21 @@ export class OcrEngine {
     // 旧写法另有一条「圈内裁图再 det+rec」的补漏通道(b27~b47):b46 实测它一页净新增 **0 行**
     // (输出全是 重复/被圈切/替换残行),只烧时间、只给顺序添噪,整条删除。
     const pageRegions = (regions ?? []).filter((r) => r.pageIndex === pageIndex);
-    if ((regions ?? []).length && !pageRegions.length) {
-      // 页级分治(b54):有圈的批次里,没画框的页不再是"跳过",而是落回整页识别,
-      // 阅读序交给「双栏版面」(pdf-builder 的 hasRegions 按页判断,已天然支持)。
-      debugLog.log(`region mode page ${pageIndex + 1}: no frames on this page → whole-page (双栏按选项)`);
-    }
-    if ((regions ?? []).length && pageRegions.length) {
+    if ((regions ?? []).length) {
+      // 纯框模式:本页没有圈 → 整页一概不处理(框=白名单)
+      if (!pageRegions.length) {
+        debugLog.log(`region mode page ${pageIndex + 1} pure-box: no frames on this page, page skipped`);
+        return {
+          pages: [{
+            pageIndex,
+            pageWidth: img.width,
+            pageHeight: img.height,
+            pageWidthPoints: img.widthPoints,
+            pageHeightPoints: img.heightPoints,
+            boxes: [],
+          }],
+        };
+      }
       onProgress?.({ stage: "det", percent: 0, message: t("engine.detPage") });
       const scaleX = img.width / (img.widthPoints || img.width || 1);
       const scaleY = img.height / (img.heightPoints || img.height || 1);

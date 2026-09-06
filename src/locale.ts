@@ -76,8 +76,8 @@ const ZH: Table = {
   "toolbar.errItem": "无法确定当前附件",
   "debugLog.menu": "OCR 调试日志",
   "toolbar.twoColumn": "双栏版面(先左栏后右栏)",
-  "toolbar.regions": "只识别「选择区域」框内的行",
-  "toolbar.regionsTip": "本页画了框=白名单:整页 det 找到所有文字行后,被任一框盖住长度一半以上的整行才写进文字层,框外一行不写;多个框按版面从上到下、从左到右输出(与画框先后无关)。本页没画框=整页识别。",
+  "toolbar.regions": "「选择区域」优先识别,圈外整页补足",
+  "toolbar.regionsTip": "本页画了框:整页 det 只跑一次,圈内行(被任一框盖住≥半行)先输出,其余行不丢弃、接在圈内之后;勾「双栏版面」时补足部分先左栏后右栏,未勾则按上下序。本页没画框=整页识别。",
 
   // hooks user-facing messages
   "hooks.nonePdf": "当前选择中没有可处理的 PDF 附件。",
@@ -168,8 +168,8 @@ const EN: Table = {
   "toolbar.errItem": "Unable to determine the attachment",
   "debugLog.menu": "OCR Debug Log",
   "toolbar.twoColumn": "Two-column layout (left then right)",
-  "toolbar.regions": "Only OCR text inside Select Area boxes",
-  "toolbar.regionsTip": "Boxes on this page act as a whitelist: the page is detected once, and only text lines covered by a box for more than half their length are written into the text layer — nothing outside the boxes is written. Multiple boxes are ordered top-to-bottom, left-to-right (regardless of draw order). No box on the page = whole page is OCR'd.",
+  "toolbar.regions": "Select-Area boxes first, whole page as fallback",
+  "toolbar.regionsTip": "Boxes on this page get priority: the page is detected once; lines covered ≥half by any box are written first, lines outside are NOT discarded — they follow. With Two-column checked the fill reads left column then right; otherwise top-to-bottom. No box on the page = whole page is OCR'd.",
 
   "hooks.nonePdf": "No processable PDF attachments in the current selection.",
   "hooks.unavailable": "{n} PDF attachment(s) found, but the local files are unavailable.",

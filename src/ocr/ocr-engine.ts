@@ -9,7 +9,7 @@
  * thread only renders pages (pdfjs) and reassembles the PDF.
  */
 import { fetchModelAssets } from "./models";
-import { frameClaimingLine, frameReadingOrder, lowDensityLine, readingOrder, stackedOrder } from "./postprocess";
+import { frameClaimingLine, frameReadingOrder, lowDensityLine, orderBoxes, readingOrder, stackedOrder } from "./postprocess";
 import { showStageOverlay, type StageMark } from "./stage-overlay";
 import { debugLog } from "../debug-log";
 import { WorkerClient } from "./worker-client";
@@ -171,8 +171,8 @@ export class OcrEngine {
 
       const src = new Uint8ClampedArray(img.data); // det 会 transfer 掉 img.data.buffer,rec 用这份源像素
 
-      // 通道一:整页 det 恰一次 → 被圈盖住长度≥一半的行才 rec(整行完整写入)。判定与写层共用
-      // frameClaimingLine。
+      // 通道一:整页 det 恰一次。圈内行(≥半行覆盖)优先 rec+写;圈外行 b58 起同样 rec,
+      // 按双栏/单栏序接在圈内后(补足)。圈只决定优先级,不再一刀切丢掉圈外。
       const raw = await this.clients[0].detPage(img.width, img.height, img.data.buffer as ArrayBuffer);
       if (this.cancelled()) throw new Error("OCR cancelled");
       const inAny = (b: OCRBox) => frameClaimingLine(b, rects);
@@ -180,25 +180,34 @@ export class OcrEngine {
       const stage: string[] = [];
       const bb = (b: OCRBox): string => `${b.raw.x1},${b.raw.y1}~${b.raw.x2},${b.raw.y2}`;
       const keptDet: OCRBox[] = [];
+      const outDet: OCRBox[] = []; // b58:圈外行不再丢弃——圈选=优先级,圈外整页补足接在圈内后
       const marks: StageMark[] = [];
       raw.forEach((b, i) => {
         const fi = inAny(b);
         if (fi >= 0) { keptDet.push(b); marks.push({ raw: b.raw, cls: "in" }); stage.push(`[det#${i}] ${bb(b)} →F${fi}`); return; }
+        outDet.push(b);
         marks.push({ raw: b.raw, cls: "out" });
-        stage.push(`[det#${i}] ${bb(b)} 拒:被圈盖住的长度不足一半`);
+        stage.push(`[det#${i}] ${bb(b)} 圈外 → 补足(${twoColumn ? "双栏" : "单栏"}序)`);
       });
       const kept = keptDet.length;
       let recdAll: OCRBox[] = [];
-      if (kept > 0) {
-        const k = Math.ceil(kept / n);
+      const recRun = async (boxes: OCRBox[]): Promise<OCRBox[]> => {
+        if (!boxes.length) return [];
+        const k = Math.ceil(boxes.length / n);
         const groups: OCRBox[][] = [];
-        for (let g = 0; g < n; g++) groups.push(keptDet.slice(g * k, Math.min((g + 1) * k, kept)));
+        for (let g = 0; g < n; g++) groups.push(boxes.slice(g * k, Math.min((g + 1) * k, boxes.length)));
         const recChunks = await Promise.all(groups.map(async (group, g) => {
           if (group.length === 0) return [] as OCRBox[];
           if (this.cancelled()) throw new Error("OCR cancelled");
           return this.clients[g].recBatch(img.width, img.height, src.slice().buffer as ArrayBuffer, group);
         }));
-        recdAll = recChunks.flat();
+        return recChunks.flat();
+      };
+      if (kept > 0) recdAll = await recRun(keptDet);
+      let outBoxes: OCRBox[] = [];
+      if (outDet.length) {
+        outBoxes = await recRun(outDet);
+        stage.push(`[补足] 圈外 ${outBoxes.length}/${outDet.length} 行已识别,按${twoColumn ? "双栏" : "单栏"}序接在圈内后`);
       }
       // 补读(b49):文本字符数明显撑不满框宽的行,99% 是 det 给的 quad 歪了/把行裁扁(实测
       // "Article history:" 出成 "e:";recBoxes 每框独立 batch=1,所以不是批内拉伸)。**候选行集合
@@ -248,6 +257,7 @@ export class OcrEngine {
       const frameOrder = frameReadingOrder(rects, img.width, twoColumn);
       stage.push(`[写序] ${twoColumn ? "双栏:横贯带→左栏→右栏" : "圈按 y→x"} 排: ${frameOrder.map((i) => "F" + i).join(" > ")}`);
       const out = frameOrder.map((fi) => stackedOrder(fullBlocks[fi])).flat();
+      if (outBoxes.length) out.push(...(twoColumn ? orderBoxes(outBoxes, img.width, true) : readingOrder(outBoxes))); // b58 圈外补足:圈内永远在前
       // 分堆效果只能量最终序:同一行带内大幅向左回跳 = 还在左右逐行交错;正常量级 ≈ 圈数
       // (每个圈到下一个圈的边界各一次)。
       let crossBack = 0;

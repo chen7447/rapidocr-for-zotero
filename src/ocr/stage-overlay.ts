@@ -10,9 +10,9 @@ export type StageCls = "in" | "out" | "norec";
 export type StageMark = { raw: Rect; cls: StageCls };
 
 const STYLE: Record<StageCls, { color: string; label: string }> = {
-  in: { color: "#1b5e20", label: "整页det：被圈盖住的长度≥半行 → 整行写入" },
-  out: { color: "#9e9e9e", label: "整页det：被圈盖住不足半行，丢弃" },
-  norec: { color: "#b71c1c", label: "整页识别未返回（空/垃圾文本）" },
+  in: { color: "#1b5e20", label: "圈内：整行写入（优先）" },
+  out: { color: "#9e9e9e", label: "圈外补足：接在圈内行之后" },
+  norec: { color: "#b71c1c", label: "识别未返回（空/垃圾文本）" },
 };
 
 /** 本仓库不引 DOM lib,canvas 2D 上下文在类型上只是 nsISupports —— 声明用到的这几个方法即可。 */

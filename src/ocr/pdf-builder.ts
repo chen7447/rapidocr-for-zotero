@@ -192,8 +192,7 @@ export async function addOcrLayerToPdf(
       debugLog.log(s);
       Zotero.debug(s);
     } catch { /* diag only */ }
-    // 写入序逐行转储:ground truth。F#=基本落在哪个框;跨界行 engine 已剔除。
-    // 框内判定与 engine 共用 frameClaimingLine(被圈盖住≥半行才算,纵向容差=行高一半)。
+    // 写入序逐行转储:ground truth。F#=圈内行;圈外补足标 [补足]。
     if (hasRegions) {
       try {
         let line = 0;
@@ -201,8 +200,7 @@ export async function addOcrLayerToPdf(
           const full = (b.text || "").trim();
           if (!full) continue;
           const fi = frameClaimingLine(b, pagePxRects);
-          if (fi < 0) continue;
-          const tag = `write#${String(line++).padStart(3, "0")} [F${fi}]`;
+          const tag = `write#${String(line++).padStart(3, "0")} ${fi >= 0 ? `[F${fi}]` : "[补足]"}`;
           debugLog.log(`${tag} ${JSON.stringify(full.slice(0, 46))}`);
         }
       } catch { /* diag only */ }
@@ -211,9 +209,8 @@ export async function addOcrLayerToPdf(
       const text = box.text.trim();
       if (!text) continue;
 
-      // b31 完整行白名单(出血容差):engine 已过滤;此处兜底拒绝跨界行。
-      // 不做字符硬裁(半词垃圾根源),不做裁剪路径(pdf.js 无视 W)。
-      if (hasRegions && frameClaimingLine(box, pagePxRects) < 0) continue;
+      // b31 完整行白名单(出血容差):engine 已减法;b58 起圈外行不再丢弃
+      // (圈选=优先级,圈外补足接尾),引擎输出的就是最终行集合,写层不再二次裁决。
       const layoutRaw = box.raw;
 
       const runs = splitFontRuns(text);

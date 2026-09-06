@@ -217,7 +217,7 @@ test("Helvetica encodes digits as WinAnsi, not Noto CID/PUA", async () => {
   assert.equal(hex, "<30313233343536373839>"); // ASCII '0'..'9'
 });
 
-test("b41: region mode is a line-level whitelist (行中心在圈内→整行写)", async () => {
+test("b41/b58: 圈内整行写,圈外行作为补足一并写入", async () => {
   const doc = await PDFDocument.create();
   doc.addPage([200, 100]); // pt;渲染 2x → 400x200px
   const originalPdf = await doc.save();
@@ -232,7 +232,7 @@ test("b41: region mode is a line-level whitelist (行中心在圈内→整行写
       boxes: [
         // 行中心(140,130) 在框内 → 整行写入,即使左右端伸出框边(b30 的"整行拒写"已废弃)
         { points: [20, 120, 260, 120, 260, 140, 20, 140], raw: { x1: 20, y1: 120, x2: 260, y2: 140 }, score: 0.9, text: "Crossing line text" },
-        // 中心(65,30) 在框外 → 不得写入
+        // 中心(65,30) 在框外 → b58 起作为补足写入(引擎已排好序,写层不再二次丢弃)
         { points: [40, 20, 90, 20, 90, 40, 40, 40], raw: { x1: 40, y1: 20, x2: 90, y2: 40 }, score: 0.9, text: "Outside row" },
         // 完整在框内:px[120,120~280,140] ⊂ 框 px[100,100~300,200]
         { points: [120, 120, 280, 120, 280, 140, 120, 140], raw: { x1: 120, y1: 120, x2: 280, y2: 140 }, score: 0.9, text: "Kept line" },
@@ -254,12 +254,12 @@ test("b41: region mode is a line-level whitelist (行中心在圈内→整行写
     stream += new TextDecoder("latin1").decode(bytes);
   }
   const blocks = stream.match(/\/PdfOcrV3 BMC/g) ?? [];
-  assert.equal(blocks.length, 2, `expected 2 overlay blocks (kept + crossing), got ${blocks.length}`);
-  // b41:中心在圈内的行整行写入;中心在圈外的行整行不写;无裁剪路径算子;无字符裁
+  assert.equal(blocks.length, 3, `expected 3 overlay blocks (kept + crossing + fill), got ${blocks.length}`);
+  // b41:中心在圈内的行整行写入;b58:圈外行补足写入;无裁剪路径算子;无字符裁
   const hexOf = (s: string) => Buffer.from(s, "latin1").toString("hex").toUpperCase();
   const streamUp = stream.toUpperCase();
   assert.ok(streamUp.includes(hexOf("Kept line")), `kept line missing: ${stream.slice(0, 400)}`);
   assert.ok(streamUp.includes(hexOf("Crossing")), `line centred in the frame must be written whole: ${stream.slice(0, 400)}`);
-  assert.ok(!streamUp.includes(hexOf("Outside")), "outside-row text must not be written");
+  assert.ok(streamUp.includes(hexOf("Outside")), "b58: out-of-frame lines are written as fill, not dropped");
   assert.ok(!/\bW\s+n\b/.test(stream), "clip-path approach must be gone (pdf.js ignores it)");
 });

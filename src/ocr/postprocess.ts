@@ -541,9 +541,11 @@ export function frameReadingOrder(
 	}
 	const order = bands.map((b) => b.sort((x, y) => rects[x].x1 - rects[y].x1)).flat();
 	// b56 双栏×圈选:圈=白名单(识别哪些),双栏=圈间顺序(怎么读)。
-	// 横贯带(宽>0.6页宽,标题/表格)当分区墙:墙前的圈先读;区内先左栏(y→x)后右栏(y→x)。
+	// b57 修正墙判据:宽>0.6页宽会把"用户画宽了的栏框"误判成墙(实测摘要圈 61.5%、
+	// 标题圈 75% 都超线,右栏反而排到左栏前)。真墙的特征是**两边顶到页边距**
+	// (刊头带 53~1151/1190):x1≤8%W 且 x2≥92%W。
 	if (!twoColumn || !pageW || pageW <= 0) return order;
-	const isFull = (i: number) => rects[i].x2 - rects[i].x1 > pageW * 0.6;
+	const isFull = (i: number) => rects[i].x1 <= pageW * 0.08 && rects[i].x2 >= pageW * 0.92;
 	const cy = (i: number) => (rects[i].y1 + rects[i].y2) / 2;
 	const colCmp = (a: number, b: number) => rects[a].y1 - rects[b].y1 || rects[a].x1 - rects[b].x1;
 	const cols = order.filter((i) => !isFull(i));

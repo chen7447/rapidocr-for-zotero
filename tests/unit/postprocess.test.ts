@@ -169,6 +169,16 @@ test("frameReadingOrder twoColumn: 横贯带切区,区内先左栏后右栏", ()
   // 无横贯带时:纯双栏序,左栏圈全部先于右栏圈
   const noWall = [rects[1], rects[2], rects[3]];
   assert.deepEqual(frameReadingOrder(noWall, 1190, true), [1, 0, 2]);
+  // b57: 用户实页 4 圈(px) — 摘要圈 61.5% 宽、标题圈 75% 宽,旧 0.6 宽度判据把
+  // 它们误判成墙 → F0>F1>F3>F2。margin 判据下只有刊头带(53~1151)是墙:
+  // F0 > F1 > F2(左 ARTICLE INFO) > F3(右 ABSTRACT)。
+  const real = [
+    { x1: 53, y1: 78, x2: 1151, y2: 311 }, // 刊头带,双margin=真墙
+    { x1: 68, y1: 336, x2: 965, y2: 515 }, // 标题+作者(75%宽,非墙)
+    { x1: 70, y1: 546, x2: 366, y2: 826 }, // 左栏 ARTICLE INFO
+    { x1: 398, y1: 546, x2: 1130, y2: 854 }, // 右栏 ABSTRACT(61.5%宽,非墙)
+  ];
+  assert.deepEqual(frameReadingOrder(real, 1190, true), [0, 1, 2, 3]);
 });
 
 test("stackedOrder: 圈内跨栏的两堆先读左堆再读右堆,不再逐行交错", () => {

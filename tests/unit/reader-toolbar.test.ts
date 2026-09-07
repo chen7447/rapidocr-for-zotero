@@ -13,8 +13,17 @@ const src = readFileSync(
 test("popup uses a shield and click-delegates strip/ocr", () => {
   assert.match(src, /POP_ID \+ "-shield"/);
   assert.match(src, /host\.append\(shield, pop\)/);
-  assert.match(src, /closest\?\.\("#pdfocr-go, #pdfocr-strip"\)/);
+  assert.match(src, /closest\?\.\("#pdfocr-go, #pdfocr-strip, #pdfocr-draw"\)/);
   assert.doesNotMatch(src, /pointerEvents = on \? "none"/);
+});
+
+test("Select-Area entry re-queries native button on click, guards active state", () => {
+  // 点击时重新查询(不缓存)+ active 防呆:已是 image 工具时不能把用户切回 pointer。
+  assert.match(src, /doc\.querySelector<HTMLElement>\("\.toolbar \.center\.tools \.toolbar-button\.area"\)/);
+  assert.match(src, /classList\.contains\("active"\)/);
+  assert.match(src, /areaBtn\.click\(\)/);
+  // 弹窗打开时按钮不存在(阅读模式/epub)则入口保持 display:none。
+  assert.match(src, /style\.removeProperty\("display"\)/);
 });
 
 test("strip OCR closes reader, shows progress, then reopens", () => {

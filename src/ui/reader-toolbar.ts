@@ -63,6 +63,19 @@ const BTN_ID = "pdfocr-toolbar-btn";
 const POP_ID = "pdfocr-toolbar-pop";
 const PLACEHOLDER = 32;
 
+/** Zotero 原生「选择区域」按钮图标(res/icons/20/annotate-area.svg,currentColor)。 */
+const AREA_ICON_SVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="none">
+  <path d="M12 1.75H8V3H12V1.75Z" fill="currentColor"/>
+  <path fill-rule="evenodd" clip-rule="evenodd" d="M4 4V16H16V4H4ZM14.75 5.25H5.25V14.75H14.75V5.25Z" fill="currentColor"/>
+  <path d="M17 14H18.25V18.25H14V17H17V14Z" fill="currentColor"/>
+  <path d="M18.25 8H17V12H18.25V8Z" fill="currentColor"/>
+  <path d="M1.75 8H3V12H1.75V8Z" fill="currentColor"/>
+  <path d="M8 17H12V18.25H8V17Z" fill="currentColor"/>
+  <path d="M14 3H17V6H18.25V1.75H14V3Z" fill="currentColor"/>
+  <path d="M3 3V6H1.75L1.75 1.75H6V3H3Z" fill="currentColor"/>
+  <path d="M6 17H3L3 14L1.75 14V18.25H6V17Z" fill="currentColor"/>
+</svg>`;
+
 let onSubmit: ((req: PageOcrRequest) => void) | null = null;
 let onStrip: ((req: StripRequest) => void) | null = null;
 let prefs: () => OcrPrefValues = () => ({ detLimitSideLen: 1536, detThresh: 0.3, detBoxThresh: 0.4, detMaxRotDeg: 30, cropMode: 2, ocrWorkers: 4 });
@@ -305,6 +318,9 @@ function togglePop(doc: Document, reader: ReaderLike, btn: HTMLElement): void {
     <label style="display:flex;align-items:center;gap:6px;margin-bottom:10px;cursor:pointer" title="${t("toolbar.regionsTip")}">
       <input id="pdfocr-regions" type="checkbox" checked>${t("toolbar.regions")} <span id="pdfocr-regionn" style="opacity:.55"></span>
     </label>
+    <button id="pdfocr-draw" type="button" title="${t("toolbar.drawAreasTip")}" style="display:none;width:100%;margin:-4px 0 10px;padding:4px 8px;border:1px solid #45475a;border-radius:6px;background:#313244;color:#cdd6f4;cursor:pointer;font:inherit;text-align:left">
+      <span style="display:inline-block;vertical-align:-3px;width:14px;height:14px;margin-right:6px;background:16% center/14px no-repeat url('data:image/svg+xml;utf8,${encodeURIComponent(AREA_ICON_SVG)}')"></span>${t("toolbar.drawAreas")}
+    </button>
     <button id="pdfocr-go" type="button" style="width:100%;padding:6px 0;border:0;border-radius:6px;background:#89b4fa;color:#1e1e2e;font-weight:600;cursor:pointer">OCR</button>
     <button id="pdfocr-strip" type="button" title="${t("toolbar.stripTip")}" style="width:100%;margin-top:6px;padding:6px 0;border:1px solid #45475a;border-radius:6px;background:#313244;color:#cdd6f4;cursor:pointer">${t("toolbar.strip")}</button>
     <div id="pdfocr-err" style="color:#f38ba8;margin-top:6px;min-height:1em"></div>
@@ -372,10 +388,18 @@ function togglePop(doc: Document, reader: ReaderLike, btn: HTMLElement): void {
   };
 
   pop.addEventListener("click", (ev: Event) => {
-    const el = (ev.target as HTMLElement | null)?.closest?.("#pdfocr-go, #pdfocr-strip");
+    const el = (ev.target as HTMLElement | null)?.closest?.("#pdfocr-go, #pdfocr-strip, #pdfocr-draw");
     if (!el) return;
     ev.preventDefault();
     ev.stopPropagation();
+    if (el.id === "pdfocr-draw") {
+      // 点击时重新查询:弹窗开着期间 React 可能重渲染换掉节点(评审建议,不缓存)。
+      const areaBtn = doc.querySelector<HTMLElement>(".toolbar .center.tools .toolbar-button.area");
+      dismissPop(doc);
+      // active 防呆:已是 image 工具时再点会切回 pointer。
+      if (areaBtn && !areaBtn.classList.contains("active")) areaBtn.click();
+      return;
+    }
     void run(el.id === "pdfocr-strip" ? "strip" : "ocr");
   });
 
@@ -392,6 +416,11 @@ function togglePop(doc: Document, reader: ReaderLike, btn: HTMLElement): void {
   };
   pop.querySelector("#pdfocr-regions")?.addEventListener("change", refreshRegionCount);
   refreshRegionCount();
+
+  // 原生「选择区域」入口:按钮与弹窗同 document,找不到(阅读模式/epub)则不显示。
+  if (doc.querySelector(".toolbar .center.tools .toolbar-button.area")) {
+    (pop.querySelector("#pdfocr-draw") as HTMLElement | null)?.style.removeProperty("display");
+  }
 }
 
 function clamp01(raw: string, fallback: number): number {

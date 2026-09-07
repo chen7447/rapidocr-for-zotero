@@ -77,6 +77,8 @@ const ZH: Table = {
   "debugLog.menu": "OCR 调试日志",
   "toolbar.twoColumn": "双栏版面(先左栏后右栏)",
   "toolbar.regions": "「选择区域」优先识别,圈外整页补足",
+  "toolbar.drawAreas": "去画「选择区域」",
+  "toolbar.drawAreasTip": "切换到 Zotero 原生「选择区域」工具(工具栏里虚线框图标那个),在页面上框选要优先识别的区域,画完回来再点 OCR。",
   "toolbar.regionsTip": "本页画了框:整页 det 只跑一次,圈内行(被任一框盖住≥半行)先输出,其余行不丢弃、接在圈内之后;勾「双栏版面」时补足部分先左栏后右栏,未勾则按上下序。本页没画框=整页识别。",
 
   // hooks user-facing messages
@@ -169,6 +171,8 @@ const EN: Table = {
   "debugLog.menu": "OCR Debug Log",
   "toolbar.twoColumn": "Two-column layout (left then right)",
   "toolbar.regions": "Select-Area boxes first, whole page as fallback",
+  "toolbar.drawAreas": "Draw Select-Area boxes",
+  "toolbar.drawAreasTip": "Switches to Zotero's native Select-Area tool (the dashed-box icon in the toolbar) so you can box the regions to prioritize; come back and run OCR when done.",
   "toolbar.regionsTip": "Boxes on this page get priority: the page is detected once; lines covered ≥half by any box are written first, lines outside are NOT discarded — they follow. With Two-column checked the fill reads left column then right; otherwise top-to-bottom. No box on the page = whole page is OCR'd.",
 
   "hooks.nonePdf": "No processable PDF attachments in the current selection.",

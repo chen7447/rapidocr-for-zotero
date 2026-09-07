@@ -3,9 +3,9 @@
     "pdfocrforzotero@example.com": {
       "updates": [
         {
-          "version": "2.0.1b1",
-          "update_hash": "sha256:fc69992236bcaffe1f1c66eff90915fb3514b375415c1748d55482f21a3c8875",
-          "update_link": "https://github.com/chen7447/rapidocr-for-zotero/releases/download/v2.0.1b1/pdf-ocr-for-zotero-2.0.1b1.xpi",
+          "version": "2.0.1",
+          "update_hash": "sha256:653de97e56d7bf7ba85bbf1253d83ee6a86037f08fb7d5c28d79fc767a692147",
+          "update_link": "https://github.com/chen7447/rapidocr-for-zotero/releases/download/v2.0.1/pdf-ocr-for-zotero-2.0.1.xpi",
           "applications": {
             "zotero": {
               "strict_min_version": "9.0",

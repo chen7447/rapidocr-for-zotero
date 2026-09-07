@@ -176,3 +176,14 @@ test("build script copies addon and bundles XPI", () => {
   assert.match(build, /esbuild\.build/);
   assert.match(build, /archiver/);
 });
+
+test("renderer fetches pdf.js wasm via fetch(), not XHR-only factory", () => {
+  const src = read("src/ocr/zotero-renderer.ts");
+  assert.match(src, /class FetchBinaryDataFactory/);
+  assert.match(src, /"XMLHttpRequest"/);
+  assert.match(src, /resource:\/\/pdfocrforzotero\/content\/scripts\//);
+  assert.match(src, /BinaryDataFactory: FetchBinaryDataFactory/);
+  const build = read("scripts/build.mjs");
+  assert.match(build, /jbig2\.wasm/);
+  assert.match(build, /openjpeg\.wasm/);
+});

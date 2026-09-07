@@ -33,6 +33,7 @@ const PDFJS_GLOBALS = [
   "URL", "URLSearchParams",
   "Blob", "File",
   "Headers", "Request", "Response", "fetch", "FormData",
+  "XMLHttpRequest",
   "AbortController", "AbortSignal",
   "ReadableStream", "WritableStream", "TransformStream",
   "ByteLengthQueuingStrategy", "CountQueuingStrategy",
@@ -49,13 +50,12 @@ const PDFJS_GLOBALS = [
   "CompressionStream", "DecompressionStream",
 ] as const;
 
-/** Copy the fixed white-list from the main window into the sandbox (once). */
+/** Copy the fixed white-list from the main window into the sandbox. */
 function ensurePDFjsGlobals(): void {
-  if (typeof (globalThis as any).DOMMatrix !== "undefined") return;
   const win = Zotero.getMainWindow();
   const sandbox = globalThis as any;
   for (const name of PDFJS_GLOBALS) {
-    if (sandbox[name] !== undefined) continue; // already available
+    if (sandbox[name] !== undefined) continue;
     try {
       const value = (win as any)[name];
       if (value !== undefined) sandbox[name] = value;
@@ -87,7 +87,8 @@ export class ZoteroPageRenderer implements PageRenderer {
     dbg("pdfjsLib getter ok");
     // Safety net: set the worker URL to the bundled worker file in the XPI
     // (only used if the main-thread WorkerMessageHandler is unavailable).
-    pdfjsLib.GlobalWorkerOptions.workerSrc = addonRoot + "content/scripts/pdf.worker.mjs";
+    // resource:// 才能被 Worker / fetch 稳定打开;jar: 的 workerSrc 在 Firefox 里会静默掉回假 worker。
+    pdfjsLib.GlobalWorkerOptions.workerSrc = "resource://pdfocrforzotero/content/scripts/pdf.worker.mjs";
     dbg("workerSrc set, typeof IOUtils=" + typeof IOUtils);
     // 读文件用 IOUtils.read(异步,不阻塞主线程)
     let data: Uint8Array;
@@ -105,8 +106,47 @@ export class ZoteroPageRenderer implements PageRenderer {
     // pdfjs's FontLoader and CanvasFactory need a document to create
     // style elements and canvases. Use the main window's document.
     const win = Zotero.getMainWindow();
+    // 探测 wasm 解码器是否真正可取到：pdf.js 解码失败只打 console warning,
+    // 不报错,白布式失败无声。取不到 wasm 时这里先暴露,而不是等整页 det=0。
+    try {
+      const r = await fetch("resource://pdfocrforzotero/content/scripts/jbig2.wasm");
+      dbg("wasm probe: " + r.status + " bytes=" + ((await r.arrayBuffer()).byteLength));
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      debugLog.log("PDF OCR v3 renderer: wasm probe FAILED: " + msg);
+      Zotero.debug("PDF OCR v3 renderer: wasm probe FAILED: " + msg);
+    }
     dbg("getDocument...");
-    const loadingTask = pdfjsLib.getDocument({ data, ownerDocument: win.document });
+    // 插件其余资源(模型/字体)都用 fetch(resource://) 成功过。pdf.js 默认工厂
+    // 对非 http(s) 走 XMLHttpRequest,沙箱原先没有 XHR → CCITT/JBIG2 解码失败、页白。
+    const wasmUrl = "resource://pdfocrforzotero/content/scripts/";
+    class FetchBinaryDataFactory {
+      cMapUrl = "";
+      standardFontDataUrl = "";
+      wasmUrl = "";
+      constructor(opts: { cMapUrl?: string | null; standardFontDataUrl?: string | null; wasmUrl?: string | null }) {
+        this.cMapUrl = opts.cMapUrl ?? "";
+        this.standardFontDataUrl = opts.standardFontDataUrl ?? "";
+        this.wasmUrl = opts.wasmUrl ?? "";
+      }
+      async fetch({ kind, filename }: { kind: string; filename: string }) {
+        const base = kind === "wasmUrl" ? this.wasmUrl
+          : kind === "cMapUrl" ? this.cMapUrl
+          : kind === "standardFontDataUrl" ? this.standardFontDataUrl
+          : "";
+        if (!base) throw new Error(`Ensure that the \`${kind}\` API parameter is provided.`);
+        const url = `${base}${filename}`;
+        const resp = await fetch(url);
+        if (!resp.ok) throw new Error(`Unable to load ${kind} at: ${url} (${resp.status})`);
+        return new Uint8Array(await resp.arrayBuffer());
+      }
+    }
+    const loadingTask = pdfjsLib.getDocument({
+      data,
+      ownerDocument: win.document,
+      wasmUrl,
+      BinaryDataFactory: FetchBinaryDataFactory,
+    });
     dbg("waiting for loadingTask.promise...");
     this.doc = await loadingTask.promise;
     dbg("loaded, numPages=" + this.doc.numPages);
@@ -140,7 +180,16 @@ export class ZoteroPageRenderer implements PageRenderer {
     const imageData = ctx.getImageData(0, 0, w, h);
     // Copy out of the window's DOM into our sandbox
     const data = new Uint8ClampedArray(imageData.data);
-    dbg("imageData copied");
+    let nonWhite = 0;
+    for (let i = 0; i < data.length; i += 4) {
+      if (data[i] < 245 || data[i + 1] < 245 || data[i + 2] < 245) nonWhite++;
+    }
+    dbg(`imageData copied ${w}x${h} nonWhite=${nonWhite}/${w * h}`);
+    if (nonWhite === 0) {
+      const s = `PDF OCR v3 renderer: page ${index + 1} render is blank (${w}x${h})`;
+      debugLog.log(s);
+      Zotero.debug(s);
+    }
 
     canvas.remove();
     page.cleanup();

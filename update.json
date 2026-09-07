@@ -4,7 +4,7 @@
       "updates": [
         {
           "version": "2.0.0",
-          "update_hash": "sha256:4536f855ac44c7fc6009e7f44dfef63063aaf2e3f72558517b5ceee5453ee9df",
+          "update_hash": "sha256:3e889258fbfa950209985d2d442f7f254a31a8ed8f17513780321ee7c42675cb",
           "update_link": "https://github.com/chen7447/rapidocr-for-zotero/releases/download/v2.0.0/pdf-ocr-for-zotero-2.0.0.xpi",
           "applications": {
             "zotero": {

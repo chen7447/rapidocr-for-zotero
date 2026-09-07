@@ -10,7 +10,7 @@ import {
   isDerivedOCRAttachment,
 } from "./zotero/selection-resolver";
 import { Job } from "./domain/job";
-import { registerReaderToolbar, unregisterReaderToolbar, PageOcrRequest, StripRequest } from "./ui/reader-toolbar";
+import { registerReaderToolbar, unregisterReaderToolbar, retrofitOpenReaders, PageOcrRequest, StripRequest } from "./ui/reader-toolbar";
 import { toPageIndexes } from "./ocr/page-spec";
 import { parseOcrPrefs, RawPrefValue } from "./ocr/prefs";
 import { debugLog } from "./debug-log";
@@ -594,6 +594,20 @@ async function handleStripOcr(req: StripRequest): Promise<void> {
 }
 
 async function onStartup(): Promise<void> {
+  // 工具栏监听必须最先注册:会话恢复的 reader 在 uiReadyPromise 后 open,
+  // renderToolbar 事件只触发一次不重放,注册晚了事件就永久错过。
+  // 注册后立刻补挂一次已打开的 reader,兜住「注册前已触发」的情况。
+  unregisterReaderToolbar();
+  registerReaderToolbar((req) => {
+    void handlePageOcr(req).catch((err) => log(`page OCR: ${err instanceof Error ? err.message : String(err)}`));
+  }, () => {
+    const p = readOcrPrefs();
+    return { detLimitSideLen: p.detLimitSideLen, detThresh: p.detThresh, detBoxThresh: p.detBoxThresh, detMaxRotDeg: p.detMaxRotDeg, cropMode: p.cropMode, ocrWorkers: p.ocrWorkers };
+  }, (req) => {
+    void handleStripOcr(req).catch((err) => log(`strip OCR: ${err instanceof Error ? err.message : String(err)}`));
+  });
+  retrofitOpenReaders();
+
   for (const window of Zotero.getMainWindows()) {
     await onMainWindowLoad(window);
   }
@@ -617,15 +631,9 @@ async function onStartup(): Promise<void> {
     // 兜底:加载时强制重建主条目右键菜单(修复被其它插件禁用搞坏的菜单)
     rebuildLibraryItemMenu();
   }
-  unregisterReaderToolbar();
-  registerReaderToolbar((req) => {
-    void handlePageOcr(req).catch((err) => log(`page OCR: ${err instanceof Error ? err.message : String(err)}`));
-  }, () => {
-    const p = readOcrPrefs();
-    return { detLimitSideLen: p.detLimitSideLen, detThresh: p.detThresh, detBoxThresh: p.detBoxThresh, detMaxRotDeg: p.detMaxRotDeg, cropMode: p.cropMode, ocrWorkers: p.ocrWorkers };
-  }, (req) => {
-    void handleStripOcr(req).catch((err) => log(`strip OCR: ${err instanceof Error ? err.message : String(err)}`));
-  });
+  // 末尾再补挂一次:异步初始化期间恢复的 reader 若走了事件路径但容器
+  // 未就绪,这里幂等补上(已有按钮则跳过)。
+  retrofitOpenReaders();
   log("startup complete");
 }
 

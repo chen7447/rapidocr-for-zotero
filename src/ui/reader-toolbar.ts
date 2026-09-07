@@ -75,7 +75,13 @@ function onRenderToolbar(event: {
   const { reader, doc, append } = event;
   if (reader.type && reader.type !== "pdf") return;
   if (doc.getElementById(BTN_ID)) return;
+  const wrap = createToolbarButton(doc, reader);
+  append(wrap);
+  void reader.setToolbarPlaceholderWidth?.(PLACEHOLDER);
+}
 
+/** 创建工具栏按钮节点(wrap>btn),与事件路径/补挂路径共用。 */
+function createToolbarButton(doc: Document, reader: ReaderLike): HTMLDivElement {
   const wrap = doc.createElement("div");
   wrap.style.cssText = "position:relative;display:flex;align-items:center;";
 
@@ -105,7 +111,14 @@ function onRenderToolbar(event: {
     togglePop(doc, reader, btn);
   });
   wrap.append(btn);
-  append(wrap);
+  return wrap;
+}
+
+/** 补挂路径:直接塞进 toolbar 的 custom-sections 容器(与事件 append 同一容器)。 */
+function ensureToolbarButton(doc: Document, reader: ReaderLike, container: Element): void {
+  if (doc.getElementById(BTN_ID)) return;
+  const wrap = createToolbarButton(doc, reader);
+  container.append(wrap);
   void reader.setToolbarPlaceholderWidth?.(PLACEHOLDER);
 }
 
@@ -413,6 +426,36 @@ export function registerReaderToolbar(
     };
   }).Reader;
   Reader?.registerEventListener("renderToolbar", onRenderToolbar, PLUGIN_ID);
+}
+
+/**
+ * 补挂:Zotero 重启后,会话恢复的 reader 其 renderToolbar 事件在插件注册
+ * 监听器之前就已触发(React CustomSections 的 useEffect 只跑一次,不重放),
+ * 事件路径覆盖不到。这里直接遍历已打开 reader,把按钮塞进同一个
+ * toolbar 容器(div.custom-sections),插入逻辑与事件回调共用
+ * ensureToolbarButton,查重 BTN_ID,幂等安全。
+ */
+export function retrofitOpenReaders(): void {
+  const readers = (Zotero as unknown as { Reader?: { _readers?: unknown[] } }).Reader?._readers;
+  if (!Array.isArray(readers)) return;
+  for (const reader of readers) {
+    if (!reader || typeof reader !== "object") continue;
+    const r = reader as ReaderLike & {
+      _type?: string;
+      _iframeWindow?: { document?: Document };
+    };
+    if (r._type && r._type !== "pdf") continue;
+    if (!r._type && r.type && r.type !== "pdf") continue;
+    const doc = r._iframeWindow?.document;
+    if (!doc) continue;
+    try {
+      const container = doc.querySelector(".toolbar .custom-sections");
+      if (!container) continue; // toolbar 尚未渲染,等事件
+      ensureToolbarButton(doc, r, container);
+    } catch {
+      // 补挂失败不影响正常功能:新开的 reader 仍走事件路径
+    }
+  }
 }
 
 export function unregisterReaderToolbar(): void {

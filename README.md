@@ -59,6 +59,7 @@
 打开 `[OCR]` PDF 时，阅读器工具栏有 **OCR 当前页** 和 **删除 OCR 文字层**。会先关掉该 PDF，写完再打开。
 
 ### 圈选区域识别
+<img width="1952" height="1496" alt="image" src="https://github.com/user-attachments/assets/07cad243-b9de-4231-b4cb-6682fde8e1f9" />
 
 1. OCR 弹窗里点 **去画选择区域**，会切到 Zotero 原生的「选择区域」工具，在页面上框出要识别的范围
 2. 画完回来点 OCR

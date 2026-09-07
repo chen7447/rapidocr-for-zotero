@@ -3,8 +3,18 @@
     "pdfocrforzotero@example.com": {
       "updates": [
         {
+          "version": "2.0.1b1",
+          "update_hash": "sha256:39b1f24001d354b344f563ad1dce8fdcabb528a221d88188f6f3e5dd8d01b43e",
+          "update_link": "https://github.com/chen7447/rapidocr-for-zotero/releases/download/v2.0.1b1/pdf-ocr-for-zotero-2.0.1b1.xpi",
+          "applications": {
+            "zotero": {
+              "strict_min_version": "9.0",
+              "strict_max_version": "10.0.*"
+            }
+          }
+        },
+        {
           "version": "2.0.0",
-          "update_hash": "sha256:e3c72f8465cebcf89f88b7f4de4c752b8697501ed834ad557b3b752bb16b1a60",
           "update_link": "https://github.com/chen7447/rapidocr-for-zotero/releases/download/v2.0.0/pdf-ocr-for-zotero-2.0.0.xpi",
           "applications": {
             "zotero": {

@@ -4,7 +4,7 @@
 
 **开装即用。** 不装 Python，不装 Tesseract，不装 OCRmyPDF，不配环境变量。下载 `.xpi` → 拖进 Zotero → 右键 **OCR PDF**。模型和引擎都打在插件里。
 
-当前版本：`2.0.1`  
+当前版本：`2.0.2`  
 支持：Zotero **9.0 – 10.0.\***
 
 ---
@@ -28,7 +28,7 @@
 1. 打开 [Releases](https://github.com/chen7447/rapidocr-for-zotero/releases)，下载最新 `.xpi`，例如：
 
    ```text
-   pdf-ocr-for-zotero-2.0.1.xpi
+   pdf-ocr-for-zotero-2.0.2.xpi
    ```
 
 2. Zotero → **工具 → 插件**
@@ -81,6 +81,10 @@
 ---
 
 ## 更新日志
+
+### 2.0.2
+
+- **修复扫描件白屏**：图片型 PDF（CCITT/JBIG2 等，如专利扫描件）OCR 时过程图整页空白、`det=0`。pdf.js 6 对 `jar:`/`resource:` 解码资源走 `XMLHttpRequest`，而插件沙箱没有 XHR——现改为与模型一致的 `fetch()` 加载 wasm 解码器，扫描件能正常识别。
 
 ### 2.0.1
 

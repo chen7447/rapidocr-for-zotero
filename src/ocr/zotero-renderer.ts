@@ -180,16 +180,18 @@ export class ZoteroPageRenderer implements PageRenderer {
     const imageData = ctx.getImageData(0, 0, w, h);
     // Copy out of the window's DOM into our sandbox
     const data = new Uint8ClampedArray(imageData.data);
-    let nonWhite = 0;
-    for (let i = 0; i < data.length; i += 4) {
-      if (data[i] < 245 || data[i + 1] < 245 || data[i + 2] < 245) nonWhite++;
+    // 白页告警走稀疏采样(每 16px 取 1,全白页必然全中);完整 nonWhite 计数只在
+    // debug 开时做 —— 8M 像素全扫在主线程上要几十 ms,多页任务每页都白交这笔过路费。
+    let blank = true;
+    for (let i = 0; i < data.length; i += 16 * 4) {
+      if (data[i] < 245 || data[i + 1] < 245 || data[i + 2] < 245) { blank = false; break; }
     }
-    dbg(`imageData copied ${w}x${h} nonWhite=${nonWhite}/${w * h}`);
-    if (nonWhite === 0) {
+    if (blank) {
       const s = `PDF OCR v3 renderer: page ${index + 1} render is blank (${w}x${h})`;
       debugLog.log(s);
       Zotero.debug(s);
     }
+    dbg(`imageData copied ${w}x${h}`);
 
     canvas.remove();
     page.cleanup();

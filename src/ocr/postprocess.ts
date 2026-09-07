@@ -742,6 +742,7 @@ export function recDecode(
   }
 
   const chars: string[] = [];
+  const times: number[] = []; // 每个字符发射的 timestep(空格恢复用)
   let prevIdx = -1;
 
   for (let t = 0; t < seqLen; t++) {
@@ -759,9 +760,54 @@ export function recDecode(
     // Skip blank (index 0) and consecutive duplicates
     if (maxIdx !== 0 && maxIdx !== prevIdx) {
       chars.push(charDict[maxIdx] || "?");
+      times.push(t);
     }
     prevIdx = maxIdx;
   }
+  if (!chars.length) return "";
 
-  return chars.join("");
+  // b62 词间空格恢复:小字/双栏正文里 CTC 常不发空格类("andTechnology")。两条证据其一即插:
+  //  1) 概率证据 —— 词间空隙里模型其实投过 Space 概率(实测真空格 maxSpace 0.11~0.38,词内几乎
+  //     恒 ≤0.002),次强证据干净可分,这是主判据;
+  //  2) 步长证据 —— 大字号标题里模型对空格不投票,退化为「间隙 ≥ 词内中位步长 ×1.55」。
+  //     宽字母 m/w/M/W 的邻对天然偏大(发射点在字形中心,宽字把间距顶长),步长证据禁用
+  //     这种邻对,交给概率证据兜底——否则满页 "fro m""chro matography"。
+  // 只在两个可打印 ASCII 之间插(中文/汉字不参与),模型已吐出的空格不重复插。
+  const isAsciiChar = (ch: string): boolean =>
+    ch.length === 1 && ch.charCodeAt(0) > 0x20 && ch.charCodeAt(0) < 0x7f;
+  let spaceIdx = -1;
+  for (let i = charDict.length - 1; i > 0; i--) {
+    if (charDict[i] === " ") { spaceIdx = i; break; }
+  }
+  const gaps: number[] = [];
+  for (let i = 1; i < chars.length; i++) {
+    if (isAsciiChar(chars[i - 1]) && isAsciiChar(chars[i])) gaps.push(times[i] - times[i - 1]);
+  }
+  // 中位步长;样本太少(单词/缩写单独成行)时按不可信处理
+  let cut = Infinity;
+  if (gaps.length >= 8) {
+    const sorted = gaps.slice().sort((a, b) => a - b);
+    cut = sorted[Math.floor(sorted.length / 2)] * 1.55;
+  }
+  const SPACE_PROB_MIN = 0.1; // ponytail: 实测分界面;调低会在 m/w 宽字母后误插("fro m")
+  let out = chars[0];
+  for (let i = 1; i < chars.length; i++) {
+    if (chars[i] !== " " && chars[i - 1] !== " "
+      && isAsciiChar(chars[i - 1]) && isAsciiChar(chars[i])) {
+      const wide = "mwMW";
+      let hit = !wide.includes(chars[i - 1]) && !wide.includes(chars[i])
+        && times[i] - times[i - 1] >= cut;
+      if (!hit && spaceIdx > 0 && spaceIdx < numClasses) {
+        let maxSpace = 0;
+        for (let tt = times[i - 1]; tt < times[i]; tt++) {
+          const p = probs[tt * numClasses + spaceIdx];
+          if (p > maxSpace) maxSpace = p;
+        }
+        hit = maxSpace >= SPACE_PROB_MIN;
+      }
+      if (hit) out += " ";
+    }
+    out += chars[i];
+  }
+  return out;
 }

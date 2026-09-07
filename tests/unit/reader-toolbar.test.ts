@@ -22,8 +22,8 @@ test("Select-Area entry re-queries native button on click, guards active state",
   assert.match(src, /doc\.querySelector<HTMLElement>\("\.toolbar \.center\.tools \.toolbar-button\.area"\)/);
   assert.match(src, /classList\.contains\("active"\)/);
   assert.match(src, /areaBtn\.click\(\)/);
-  // 弹窗打开时按钮不存在(阅读模式/epub)则入口保持 display:none。
-  assert.match(src, /style\.removeProperty\("display"\)/);
+  // 弹窗打开时按钮不存在(阅读模式/epub)则入口保持 hidden。
+  assert.match(src, /removeAttribute\("hidden"\)/);
 });
 
 test("strip OCR closes reader, shows progress, then reopens", () => {

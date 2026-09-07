@@ -173,6 +173,7 @@ function currentPage(reader: ReaderLike): number {
 }
 
 const SHIELD_ID = POP_ID + "-shield";
+const POP_CSS_ID = POP_ID + "-css";
 
 /** Any-shape bbox (PDF points) from an annotation position: rects/paths, nested arrays, or {lines/points} objects. */
 export function regionBBox(pos: { rects?: unknown; paths?: unknown } | null | undefined): { x1: number; y1: number; x2: number; y2: number } | null {
@@ -272,58 +273,101 @@ function togglePop(doc: Document, reader: ReaderLike, btn: HTMLElement): void {
     "width:240px",
     "padding:10px",
     "border-radius:8px",
-    "background:#1e1e2e",
-    "color:#cdd6f4",
+    "background:var(--pdfocr-pop-bg)",
+    "color:var(--pdfocr-pop-text)",
     "font:12px/1.4 system-ui,sans-serif",
     "box-shadow:0 8px 24px rgba(0,0,0,.4)",
   ].join(";");
+  // 主题变量:宿主 reader iframe 随系统亮暗(prefers-color-scheme)切换;
+  // Zotero 自身主题独立于系统时退回暗色,可接受(DeepSeek 评审结论)。
+  if (!doc.getElementById(POP_CSS_ID)) {
+    const st = doc.createElement("style");
+    st.id = POP_CSS_ID;
+    st.textContent = `#${POP_ID}{
+  --pdfocr-pop-bg:#1e1e2e; --pdfocr-pop-text:#cdd6f4;
+  --pdfocr-pop-sec:#313244; --pdfocr-pop-border:#45475a;
+  --pdfocr-pop-accent:#89b4fa; --pdfocr-pop-onaccent:#1e1e2e;
+  --pdfocr-pop-err:#f38ba8;
+}
+@media (prefers-color-scheme: light){
+  #${POP_ID}{
+    --pdfocr-pop-bg:#ffffff; --pdfocr-pop-text:#4c4f69;
+    --pdfocr-pop-sec:#e6e9ef; --pdfocr-pop-border:#ccd0da;
+    --pdfocr-pop-accent:#1e66f5; --pdfocr-pop-onaccent:#ffffff;
+    --pdfocr-pop-err:#d20f39;
+  }
+}
+#${POP_ID} input,#${POP_ID} select{width:100%;margin-top:2px;box-sizing:border-box}
+#${POP_ID} #pdfocr-go{width:100%;padding:7px 0;border:0;border-radius:6px;background:var(--pdfocr-pop-accent);color:var(--pdfocr-pop-onaccent);font-weight:600;cursor:pointer}
+#${POP_ID} #pdfocr-strip,#${POP_ID} #pdfocr-draw{width:100%;padding:5px 8px;border:1px solid var(--pdfocr-pop-border);border-radius:6px;background:var(--pdfocr-pop-sec);color:var(--pdfocr-pop-text);cursor:pointer;font:inherit;text-align:left}
+#${POP_ID} #pdfocr-strip{margin-top:6px;text-align:center}
+#${POP_ID} #pdfocr-draw{margin:0 0 10px;padding:4px 8px}
+#${POP_ID} #pdfocr-draw[hidden]{display:none}
+#${POP_ID} #pdfocr-err{color:var(--pdfocr-pop-err);margin-top:6px;min-height:2.6em;word-break:break-all}
+#${POP_ID} .pdfocr-row{display:flex;align-items:center;gap:6px;margin-bottom:10px;cursor:pointer}
+#${POP_ID} label.pdfocr-field{display:block;margin-bottom:10px}
+#${POP_ID} details.pdfocr-adv{margin-bottom:10px}
+#${POP_ID} details.pdfocr-adv>summary{list-style:none;cursor:pointer;padding:5px 8px;border:1px solid var(--pdfocr-pop-border);border-radius:6px;background:var(--pdfocr-pop-sec);color:var(--pdfocr-pop-text);text-align:center;user-select:none}
+#${POP_ID} details.pdfocr-adv>summary::-webkit-details-marker{display:none}
+#${POP_ID} details.pdfocr-adv[open]>summary{border-bottom-left-radius:0;border-bottom-right-radius:0}
+#${POP_ID} details.pdfocr-adv>div{padding:10px 4px 0;border:1px solid var(--pdfocr-pop-border);border-top:0;border-radius:0 0 6px 6px}
+#${POP_ID} .pdfocr-hint{display:block;font-size:10px;opacity:.55;margin-top:1px}`;
+    doc.head?.append(st);
+  }
   pop.innerHTML = `
-    <label style="display:block;margin-bottom:8px">${t("toolbar.pages")}
-      <input id="pdfocr-pages" type="text" style="width:100%;margin-top:2px;box-sizing:border-box"
-        value="${currentPage(reader)}" placeholder="${t("toolbar.pagesHint")}">
+    <label class="pdfocr-field">${t("toolbar.pages")}
+      <input id="pdfocr-pages" type="text" value="${currentPage(reader)}" placeholder="${t("toolbar.pagesHint")}">
     </label>
-    <label style="display:block;margin-bottom:6px">${t("toolbar.res")}
-      <select id="pdfocr-limit" style="width:100%;margin-top:2px">
-        ${[512, 768, 960, 1024, 1280, 1366, 1536, 1920].map((n) =>
-          `<option value="${n}"${n === p.detLimitSideLen ? " selected" : ""}>${n}${n === 1536 ? t("toolbar.recommended") : ""}${n === 1920 ? t("toolbar.largeScan") : ""}</option>`,
-        ).join("")}
-      </select>
-    </label>
-    <label style="display:block;margin-bottom:6px">${t("toolbar.thresh")}
-      <input id="pdfocr-thresh" type="number" min="0" max="1" step="0.05" style="width:100%;margin-top:2px;box-sizing:border-box" value="${p.detThresh}">
-    </label>
-    <label style="display:block;margin-bottom:6px">${t("toolbar.box")}
-      <input id="pdfocr-box" type="number" min="0" max="1" step="0.05" style="width:100%;margin-top:2px;box-sizing:border-box" value="${p.detBoxThresh}">
-    </label>
-    <label style="display:block;margin-bottom:10px">${t("toolbar.tilt")}
-      <input id="pdfocr-maxrot" type="number" min="0" max="90" step="5" style="width:100%;margin-top:2px;box-sizing:border-box" value="${p.detMaxRotDeg}">
-    </label>
-    <label style="display:block;margin-bottom:10px">${t("toolbar.crop")}
-      <select id="pdfocr-cropmode" style="width:100%;margin-top:2px">
+    <label class="pdfocr-field">${t("toolbar.crop")}
+      <select id="pdfocr-cropmode">
         <option value="0"${p.cropMode === 0 ? " selected" : ""}>${t("toolbar.crop0")}</option>
         <option value="1"${p.cropMode === 1 ? " selected" : ""}>${t("toolbar.crop1")}</option>
         <option value="2"${p.cropMode === 2 ? " selected" : ""}>${t("toolbar.crop2")}</option>
       </select>
     </label>
-    <label style="display:block;margin-bottom:10px">${t("toolbar.workers")}
-      <select id="pdfocr-workers" style="width:100%;margin-top:2px">
-        ${[1, 2, 3, 4, 5, 6, 7, 8].map((n) =>
-          `<option value="${n}"${n === p.ocrWorkers ? " selected" : ""}>${n} ${t("toolbar.coresUnit")}${n === 4 ? t("toolbar.recommended") : ""}</option>`,
-        ).join("")}
-      </select>
-    </label>
-    <label style="display:flex;align-items:center;gap:6px;margin-bottom:10px;cursor:pointer">
+    <details class="pdfocr-adv">
+      <summary>${t("toolbar.adv")}</summary>
+      <div>
+        <label class="pdfocr-field">${t("toolbar.res")}
+          <select id="pdfocr-limit">
+            ${[512, 768, 960, 1024, 1280, 1366, 1536, 1920].map((n) =>
+              `<option value="${n}"${n === p.detLimitSideLen ? " selected" : ""}>${n}${n === 1536 ? t("toolbar.recommended") : ""}${n === 1920 ? t("toolbar.largeScan") : ""}</option>`,
+            ).join("")}
+          </select>
+        </label>
+        <label class="pdfocr-field">${t("toolbar.thresh")}
+          <input id="pdfocr-thresh" type="number" min="0" max="1" step="0.05" value="${p.detThresh}">
+          <span class="pdfocr-hint">${t("toolbar.threshHint")}</span>
+        </label>
+        <label class="pdfocr-field">${t("toolbar.box")}
+          <input id="pdfocr-box" type="number" min="0" max="1" step="0.05" value="${p.detBoxThresh}">
+          <span class="pdfocr-hint">${t("toolbar.boxHint")}</span>
+        </label>
+        <label class="pdfocr-field">${t("toolbar.tilt")}
+          <input id="pdfocr-maxrot" type="number" min="0" max="90" step="5" value="${p.detMaxRotDeg}">
+          <span class="pdfocr-hint">${t("toolbar.tiltHint")}</span>
+        </label>
+        <label class="pdfocr-field">${t("toolbar.workers")}
+          <select id="pdfocr-workers">
+            ${[1, 2, 3, 4, 5, 6, 7, 8].map((n) =>
+              `<option value="${n}"${n === p.ocrWorkers ? " selected" : ""}>${n} ${t("toolbar.coresUnit")}${n === 4 ? t("toolbar.recommended") : ""}</option>`,
+            ).join("")}
+          </select>
+        </label>
+      </div>
+    </details>
+    <label class="pdfocr-row">
       <input id="pdfocr-twocol" type="checkbox">${t("toolbar.twoColumn")}
     </label>
-    <label style="display:flex;align-items:center;gap:6px;margin-bottom:10px;cursor:pointer" title="${t("toolbar.regionsTip")}">
+    <label class="pdfocr-row" title="${t("toolbar.regionsTip")}">
       <input id="pdfocr-regions" type="checkbox" checked>${t("toolbar.regions")} <span id="pdfocr-regionn" style="opacity:.55"></span>
     </label>
-    <button id="pdfocr-draw" type="button" title="${t("toolbar.drawAreasTip")}" style="display:none;width:100%;margin:-4px 0 10px;padding:4px 8px;border:1px solid #45475a;border-radius:6px;background:#313244;color:#cdd6f4;cursor:pointer;font:inherit;text-align:left">
+    <button id="pdfocr-draw" type="button" hidden title="${t("toolbar.drawAreasTip")}">
       <span style="display:inline-block;vertical-align:-3px;width:14px;height:14px;margin-right:6px;background:16% center/14px no-repeat url('data:image/svg+xml;utf8,${encodeURIComponent(AREA_ICON_SVG)}')"></span>${t("toolbar.drawAreas")}
     </button>
-    <button id="pdfocr-go" type="button" style="width:100%;padding:6px 0;border:0;border-radius:6px;background:#89b4fa;color:#1e1e2e;font-weight:600;cursor:pointer">OCR</button>
-    <button id="pdfocr-strip" type="button" title="${t("toolbar.stripTip")}" style="width:100%;margin-top:6px;padding:6px 0;border:1px solid #45475a;border-radius:6px;background:#313244;color:#cdd6f4;cursor:pointer">${t("toolbar.strip")}</button>
-    <div id="pdfocr-err" style="color:#f38ba8;margin-top:6px;min-height:1em"></div>
+    <button id="pdfocr-go" type="button">OCR</button>
+    <button id="pdfocr-strip" type="button" title="${t("toolbar.stripTip")}">${t("toolbar.strip")}</button>
+    <div id="pdfocr-err" aria-live="polite"></div>
   `;
   const host = doc.body ?? doc.documentElement;
   if (!host) return;
@@ -336,6 +380,17 @@ function togglePop(doc: Document, reader: ReaderLike, btn: HTMLElement): void {
     ev.stopPropagation();
     dismissPop(doc);
   });
+
+  // 主按钮随页码联动:用户点之前就知道 OCR 哪几页(页码 input 任意输入即更新)。
+  const goBtn = pop.querySelector("#pdfocr-go") as HTMLButtonElement | null;
+  const syncGo = (): void => {
+    const spec = (pop.querySelector("#pdfocr-pages") as HTMLInputElement).value.trim();
+    if (!goBtn) return;
+    if (!spec || spec === String(currentPage(reader))) goBtn.textContent = t("toolbar.go");
+    else goBtn.textContent = `${t("toolbar.go")} ${spec}`;
+  };
+  pop.querySelector("#pdfocr-pages")?.addEventListener("input", syncGo);
+  syncGo();
 
   const readPages = (): number[] | null => {
     const spec = (pop.querySelector("#pdfocr-pages") as HTMLInputElement).value;
@@ -411,7 +466,7 @@ function togglePop(doc: Document, reader: ReaderLike, btn: HTMLElement): void {
       // 圈没被吃到时必须说话:标注是按附件存的,画在原件上的圈不会跟到 [OCR] 派生文件,
       // 于是这一轮其实走了整页识别(实测用户因此以为"识别结果和圈的内容不一致")。
       el.textContent = rs.length ? `— 本页 ${rs.length} 个圈,只识别圈内的整行` : `— 本页没有圈,将识别整页!`;
-      (el as unknown as { style: { color: string } }).style.color = rs.length ? "" : "#f38ba8";
+      (el as unknown as { style: { color: string } }).style.color = rs.length ? "" : "var(--pdfocr-pop-err)";
     });
   };
   pop.querySelector("#pdfocr-regions")?.addEventListener("change", refreshRegionCount);
@@ -419,7 +474,7 @@ function togglePop(doc: Document, reader: ReaderLike, btn: HTMLElement): void {
 
   // 原生「选择区域」入口:按钮与弹窗同 document,找不到(阅读模式/epub)则不显示。
   if (doc.querySelector(".toolbar .center.tools .toolbar-button.area")) {
-    (pop.querySelector("#pdfocr-draw") as HTMLElement | null)?.style.removeProperty("display");
+    (pop.querySelector("#pdfocr-draw") as HTMLElement | null)?.removeAttribute("hidden");
   }
 }
 

@@ -10,7 +10,9 @@
  */
 import { fetchModelAssets } from "./models";
 import { frameClaimingLine, frameReadingOrder, lowDensityLine, orderBoxes, readingOrder, scaleBox, stackedOrder } from "./postprocess";
-import { showStageOverlay, type StageMark } from "./stage-overlay";
+// [诊断弹窗·测试用] 正式版关闭;恢复测试时:取消本行与下方 showStageOverlay 调用的注释。
+// import { showStageOverlay, type StageMark } from "./stage-overlay";
+import type { StageMark } from "./stage-overlay";
 import { debugLog } from "../debug-log";
 import { WorkerClient } from "./worker-client";
 import { OCRResult, OCRPageResult, PageRenderer, OCRBox } from "./types";
@@ -323,8 +325,10 @@ export class OcrEngine {
       // 一份证据同时进日志和弹窗「复制文字」:标注原始 pt → 页 pt 尺寸 → 缩放 → 引擎吃的 px
       const head = `rects=${rects.length} 标注pts[${pageRegions.map((r) => `${r.x1.toFixed(1)},${r.y1.toFixed(1)}~${r.x2.toFixed(1)},${r.y2.toFixed(1)}`).join(" ")}] 页=${img.widthPoints}x${img.heightPoints}pt scale=${scaleX.toFixed(2)} → px[${rects.map((r) => `${r.x1},${r.y1}~${r.x2},${r.y2}`).join(" ")}]`;
       debugLog.log(`region mode page ${pageIndex + 1} det-then-subtract: ${head} whole=${raw.length} kept=${keptLines} norec=${missed} total=${out.length}`);
-      showStageOverlay(`page ${pageIndex + 1}`, { width: img.width, height: img.height, rgba: src }, rects, marks,
-        `${head} 整页det=${raw.length} 写入=${out.length}\n` + stage.join("\n"));
+      // [诊断弹窗·测试用] 正式版关闭(弹窗不再弹给最终用户);恢复测试时取消注释。
+      // marks 收集与 stage 文本保留:debugLog 里仍有完整明细。
+      // showStageOverlay(`page ${pageIndex + 1}`, { width: img.width, height: img.height, rgba: src }, rects, marks,
+      //   `${head} 整页det=${raw.length} 写入=${out.length}\n` + stage.join("\n"));
       return {
         pages: [{
           pageIndex,

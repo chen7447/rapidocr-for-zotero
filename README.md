@@ -45,6 +45,9 @@
 
 1. 在文献库里选中带 PDF 的条目，或直接选中 PDF 附件  
 2. 右键 → **OCR PDF**  
+<img width="374" height="926" alt="image" src="https://github.com/user-attachments/assets/631975a7-3d3e-4f81-ae39-afd57551f3ce" />
+
+
 3. 等进度窗口跑完  
 4. 同一条目下会出现 `[OCR]` 附件（文件名 `*-ocr.pdf`）  
 5. 打开这个附件：可以选中文字、复制、翻译

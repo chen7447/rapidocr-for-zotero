@@ -76,6 +76,16 @@ const AREA_ICON_SVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 2
   <path d="M6 17H3L3 14L1.75 14V18.25H6V17Z" fill="currentColor"/>
 </svg>`;
 
+/** 搜索/识别图标(放大镜,通用 16px 线条风格,currentColor)。 */
+const SEARCH_ICON_SVG = `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16">
+  <path fill="currentColor" fill-rule="evenodd" d="M11.5 8a3.5 3.5 0 1 0-2.12 6.28l-1.55 1.55a.75.75 0 1 0 1.06 1.06l1.55-1.55A3.5 3.5 0 0 0 11.5 8zM9.5 11.5a2 2 0 1 1 4 0 2 2 0 0 1-4 0z"/>
+</svg>`;
+
+/** 橡皮擦图标(通用 16px 线条风格,currentColor)。 */
+const ERASER_ICON_SVG = `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16">
+  <path fill="currentColor" fill-rule="evenodd" d="M10.9 1.6 14.4 5.1a1.2 1.2 0 0 1 0 1.7l-6.5 6.5a1.2 1.2 0 0 1-1.7 0L2 9.1a1.2 1.2 0 0 1 0-1.7L8.6 .9a1.2 1.2 0 0 1 1.7 0l.6.7zM5 4.6 2.7 6.9a.4.4 0 0 0 0 .6L5 9.8l3.2-3.2L5 4.6zm4.2.1L6 7.9 8.1 10l3.2-3.2L9.2 4.7zM6.6 11.9l1.2 1.2H13a.6.6 0 0 0 .6-.6v-.6H6.6z"/>
+</svg>`;
+
 let onSubmit: ((req: PageOcrRequest) => void) | null = null;
 let onStrip: ((req: StripRequest) => void) | null = null;
 let prefs: () => OcrPrefValues = () => ({ detLimitSideLen: 1536, detThresh: 0.3, detBoxThresh: 0.4, detMaxRotDeg: 30, cropMode: 2, ocrWorkers: 4 });
@@ -298,13 +308,14 @@ function togglePop(doc: Document, reader: ReaderLike, btn: HTMLElement): void {
   }
 }
 #${POP_ID} input,#${POP_ID} select{width:100%;margin-top:2px;box-sizing:border-box}
-#${POP_ID} #pdfocr-go{width:100%;padding:7px 0;border:0;border-radius:6px;background:var(--pdfocr-pop-accent);color:var(--pdfocr-pop-onaccent);font-weight:600;cursor:pointer}
-#${POP_ID} #pdfocr-strip,#${POP_ID} #pdfocr-draw{width:100%;padding:5px 8px;border:1px solid var(--pdfocr-pop-border);border-radius:6px;background:var(--pdfocr-pop-sec);color:var(--pdfocr-pop-text);cursor:pointer;font:inherit;text-align:left}
-#${POP_ID} #pdfocr-strip{margin-top:6px;text-align:center}
-#${POP_ID} #pdfocr-draw{margin:0 0 10px;padding:4px 8px}
+#${POP_ID} #pdfocr-go{width:100%;padding:7px 0;border:0;border-radius:6px;background:var(--pdfocr-pop-accent);color:var(--pdfocr-pop-onaccent);font-weight:600;cursor:pointer;text-align:center}
+#${POP_ID} #pdfocr-strip,#${POP_ID} #pdfocr-draw{width:100%;padding:5px 8px;border:1px solid var(--pdfocr-pop-border);border-radius:6px;background:var(--pdfocr-pop-sec);color:var(--pdfocr-pop-text);cursor:pointer;font:inherit;text-align:center}
+#${POP_ID} #pdfocr-strip{margin-top:6px}
+#${POP_ID} #pdfocr-draw{margin:0 0 10px;padding:4px 8px;text-align:left}
 #${POP_ID} #pdfocr-draw[hidden]{display:none}
-#${POP_ID} #pdfocr-err{color:var(--pdfocr-pop-err);margin-top:6px;min-height:2.6em;word-break:break-all}
-#${POP_ID} .pdfocr-row{display:flex;align-items:center;gap:6px;margin-bottom:10px;cursor:pointer}
+#${POP_ID} #pdfocr-err{color:var(--pdfocr-pop-err);margin-top:6px;min-height:0;word-break:break-all}
+#${POP_ID} .pdfocr-row{display:flex;flex-wrap:wrap;align-items:center;gap:2px 6px;margin-bottom:10px;cursor:pointer}
+#${POP_ID} .pdfocr-row input[type="checkbox"]{width:auto}
 #${POP_ID} label.pdfocr-field{display:block;margin-bottom:10px}
 #${POP_ID} details.pdfocr-adv{margin-bottom:10px}
 #${POP_ID} details.pdfocr-adv>summary{list-style:none;cursor:pointer;padding:5px 8px;border:1px solid var(--pdfocr-pop-border);border-radius:6px;background:var(--pdfocr-pop-sec);color:var(--pdfocr-pop-text);text-align:center;user-select:none}
@@ -360,13 +371,18 @@ function togglePop(doc: Document, reader: ReaderLike, btn: HTMLElement): void {
       <input id="pdfocr-twocol" type="checkbox">${t("toolbar.twoColumn")}
     </label>
     <label class="pdfocr-row" title="${t("toolbar.regionsTip")}">
-      <input id="pdfocr-regions" type="checkbox" checked>${t("toolbar.regions")} <span id="pdfocr-regionn" style="opacity:.55"></span>
+      <input id="pdfocr-regions" type="checkbox" checked>${t("toolbar.regions")}
     </label>
+    <div id="pdfocr-regionn" style="display:block;font-size:10px;opacity:.6;margin:-6px 0 10px 4px"></div>
     <button id="pdfocr-draw" type="button" hidden title="${t("toolbar.drawAreasTip")}">
       <span style="display:inline-block;vertical-align:-3px;width:14px;height:14px;margin-right:6px;background:16% center/14px no-repeat url('data:image/svg+xml;utf8,${encodeURIComponent(AREA_ICON_SVG)}')"></span>${t("toolbar.drawAreas")}
     </button>
-    <button id="pdfocr-go" type="button">OCR</button>
-    <button id="pdfocr-strip" type="button" title="${t("toolbar.stripTip")}">${t("toolbar.strip")}</button>
+    <button id="pdfocr-go" type="button" title="${t("toolbar.pageOcr")}">
+      <span class="pdfocr-goi" style="display:inline-block;vertical-align:-3px;width:14px;height:14px;margin-right:5px;background:16% center/14px no-repeat url('data:image/svg+xml;utf8,${encodeURIComponent(SEARCH_ICON_SVG)}')"></span>${t("toolbar.go")}
+    </button>
+    <button id="pdfocr-strip" type="button" title="${t("toolbar.stripTip")}">
+      <span class="pdfocr-goi" style="display:inline-block;vertical-align:-3px;width:14px;height:14px;margin-right:5px;background:16% center/14px no-repeat url('data:image/svg+xml;utf8,${encodeURIComponent(ERASER_ICON_SVG)}')"></span>${t("toolbar.strip")}
+    </button>
     <div id="pdfocr-err" aria-live="polite"></div>
   `;
   const host = doc.body ?? doc.documentElement;
@@ -383,11 +399,12 @@ function togglePop(doc: Document, reader: ReaderLike, btn: HTMLElement): void {
 
   // 主按钮随页码联动:用户点之前就知道 OCR 哪几页(页码 input 任意输入即更新)。
   const goBtn = pop.querySelector("#pdfocr-go") as HTMLButtonElement | null;
+  const goLabel = goBtn?.lastChild as Text | null; // 按钮内最后一个文本节点(图标 span 之后)
   const syncGo = (): void => {
+    if (!goBtn || !goLabel) return;
     const spec = (pop.querySelector("#pdfocr-pages") as HTMLInputElement).value.trim();
-    if (!goBtn) return;
-    if (!spec || spec === String(currentPage(reader))) goBtn.textContent = t("toolbar.go");
-    else goBtn.textContent = `${t("toolbar.go")} ${spec}`;
+    if (!spec || spec === String(currentPage(reader))) goLabel.textContent = t("toolbar.go");
+    else goLabel.textContent = `${t("toolbar.go")} ${spec}`;
   };
   pop.querySelector("#pdfocr-pages")?.addEventListener("input", syncGo);
   syncGo();
@@ -465,7 +482,7 @@ function togglePop(doc: Document, reader: ReaderLike, btn: HTMLElement): void {
     void collectRegions(reader).then((rs) => {
       // 圈没被吃到时必须说话:标注是按附件存的,画在原件上的圈不会跟到 [OCR] 派生文件,
       // 于是这一轮其实走了整页识别(实测用户因此以为"识别结果和圈的内容不一致")。
-      el.textContent = rs.length ? `— 本页 ${rs.length} 个圈,只识别圈内的整行` : `— 本页没有圈,将识别整页!`;
+      el.textContent = rs.length ? `本页 ${rs.length} 个圈,只识别圈内的整行` : `本页没有圈,将识别整页!`;
       (el as unknown as { style: { color: string } }).style.color = rs.length ? "" : "var(--pdfocr-pop-err)";
     });
   };

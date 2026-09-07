@@ -105,6 +105,16 @@ export class ZoteroPageRenderer implements PageRenderer {
     // pdfjs's FontLoader and CanvasFactory need a document to create
     // style elements and canvases. Use the main window's document.
     const win = Zotero.getMainWindow();
+    // 探测 wasm 解码器是否真正可取到：pdf.js 解码失败只打 console warning,
+    // 不报错,白布式失败无声。取不到 wasm 时这里先暴露,而不是等整页 det=0。
+    try {
+      const r = await fetch(addonRoot + "content/scripts/jbig2.wasm");
+      dbg("wasm probe: " + r.status + " bytes=" + ((await r.arrayBuffer()).byteLength));
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      debugLog.log("PDF OCR v3 renderer: wasm probe FAILED: " + msg);
+      Zotero.debug("PDF OCR v3 renderer: wasm probe FAILED: " + msg);
+    }
     dbg("getDocument...");
     const loadingTask = pdfjsLib.getDocument({
       data,

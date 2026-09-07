@@ -30,6 +30,13 @@ fs.copyFileSync(
   path.join(stageRoot, "content", "scripts", "pdf.worker.mjs"),
 );
 
+// pdf.js 6.x 把 JBIG2/JPEG2000/ICC 解码挪进 wasm，缺了这些文件时扫描版
+// （图片型 PDF）会静默渲染成全白页。必须随 XPI 分发并通过 wasmUrl 指向这里。
+const pdfjsWasm = path.join(projectRoot, "node_modules", "pdfjs-dist", "wasm");
+for (const f of ["jbig2.wasm", "openjpeg.wasm", "qcms_bg.wasm"]) {
+  fs.copyFileSync(path.join(pdfjsWasm, f), path.join(stageRoot, "content", "scripts", f));
+}
+
 await esbuild.build({
   entryPoints: [path.join(projectRoot, "src", "index.ts")],
   outfile: path.join(stageRoot, "content", "scripts", "pdf-ocr-for-zotero.js"),

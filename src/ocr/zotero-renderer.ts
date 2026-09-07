@@ -106,7 +106,13 @@ export class ZoteroPageRenderer implements PageRenderer {
     // style elements and canvases. Use the main window's document.
     const win = Zotero.getMainWindow();
     dbg("getDocument...");
-    const loadingTask = pdfjsLib.getDocument({ data, ownerDocument: win.document });
+    const loadingTask = pdfjsLib.getDocument({
+      data,
+      ownerDocument: win.document,
+      // pdf.js 6.x 的 JBIG2/JPEG2000/ICC 解码在 wasm 里，不传 wasmUrl 时
+      // 图片流解码失败 → 扫描件渲染成全白页（det=0 的"白布"现象）。
+      wasmUrl: addonRoot + "content/scripts/",
+    });
     dbg("waiting for loadingTask.promise...");
     this.doc = await loadingTask.promise;
     dbg("loaded, numPages=" + this.doc.numPages);

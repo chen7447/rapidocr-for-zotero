@@ -699,6 +699,24 @@ export function isGarbageText(text: string): boolean {
   return useful < 2 && t.length >= 4;
 }
 
+// ─── b59 高分辨率抢救:框坐标整体缩放 ────────────────────────────────
+
+/**
+ * 把框(points + raw)按 ratio 缩放,用于在 4× 重渲染图上重新裁剪 rec。
+ * 纯函数:round-trip scaleBox(scaleBox(b,r),1/r) === b(整数坐标下)。
+ */
+export function scaleBox<T extends { points: number[]; raw: { x1: number; y1: number; x2: number; y2: number } }>(
+	b: T,
+	ratio: number,
+): T {
+	const r = (v: number): number => Math.round(v * ratio);
+	return {
+		...b,
+		points: b.points.map(r),
+		raw: { x1: r(b.raw.x1), y1: r(b.raw.y1), x2: r(b.raw.x2), y2: r(b.raw.y2) },
+	};
+}
+
 // ─── rec decode (CTC) ───────────────────────────────────────────────
 
 /**

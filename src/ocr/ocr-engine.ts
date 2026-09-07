@@ -9,7 +9,7 @@
  * thread only renders pages (pdfjs) and reassembles the PDF.
  */
 import { fetchModelAssets } from "./models";
-import { frameClaimingLine, frameReadingOrder, lowDensityLine, orderBoxes, readingOrder, stackedOrder } from "./postprocess";
+import { frameClaimingLine, frameReadingOrder, lowDensityLine, orderBoxes, readingOrder, scaleBox, stackedOrder } from "./postprocess";
 import { showStageOverlay, type StageMark } from "./stage-overlay";
 import { debugLog } from "../debug-log";
 import { WorkerClient } from "./worker-client";
@@ -213,7 +213,7 @@ export class OcrEngine {
       // "Article history:" 出成 "e:";recBoxes 每框独立 batch=1,所以不是批内拉伸)。**候选行集合
       // 不变** —— 整页 det 仍只跑一次、圈仍是唯一减法,这里只把可疑框的 points 换成 AABB 重 rec,
       // 谁认出的字符多留谁;det 认领但 rec 交白卷的行也走这条路捞。ponytail: 每页最多 8 框。
-      const recdBy = new Map(recdAll.map((b) => [`${b.raw.x1},${b.raw.y1}`, b] as const));
+      const recdBy = new Map<string, OCRBox>(recdAll.map((b) => [`${b.raw.x1},${b.raw.y1}`, b] as const));
       const suspect = keptDet.filter((b) => lowDensityLine(recdBy.get(`${b.raw.x1},${b.raw.y1}`) ?? b)).slice(0, 8);
       if (suspect.length) {
         if (this.cancelled()) throw new Error("OCR cancelled");
@@ -237,14 +237,50 @@ export class OcrEngine {
           }
         }
       }
+      // b59 高分辨率抢救:rec 交白卷的行多数是 ~8px 小字(斜体邮箱/DOI/脚注),6× 拉伸后
+      // CTC 塌缩 —— 补读救不了"信息量不足"。这里按 4× 重渲染整页一次,未返回框 ×2 重裁
+      // 重 rec(字形 16-18px,够读)。每页上限 8 框,仅当存在未返回行时才多渲一次。
+      const missedKept = keptDet.filter((b) => !recdBy.has(`${b.raw.x1},${b.raw.y1}`));
+      const outKeys = new Set<string>(outBoxes.map((b) => `${b.raw.x1},${b.raw.y1}`));
+      const missedOut = outDet.filter((b) => !outKeys.has(`${b.raw.x1},${b.raw.y1}`));
+      const rescue = [...missedKept, ...missedOut].slice(0, 8);
+      if (rescue.length) {
+        try {
+          const hi = await this.renderer.renderPage(pageIndex, 4);
+          const ratio = hi.width / img.width;
+          const fixed = await this.clients[0].recBatch(hi.width, hi.height, hi.data.buffer as ArrayBuffer, rescue.map((b) => scaleBox(b, ratio)));
+          let saved = 0;
+          for (const f of fixed) {
+            const k = `${Math.round(f.raw.x1 / ratio)},${Math.round(f.raw.y1 / ratio)}`;
+            if (!(f.text || "").trim()) continue;
+            const s = recdBy.get(k);
+            if (s) { s.text = f.text; } // 幸存但文本更差的圈内行:直接换更好的
+            else {
+              const orig = rescue.find((b) => `${b.raw.x1},${b.raw.y1}` === k);
+              if (orig) {
+                const restored: OCRBox = { points: orig.points.slice(), raw: orig.raw, score: orig.score, text: f.text };
+                if (missedKept.includes(orig)) recdAll.push(restored); // fullBlocks 随后拾起
+                else outBoxes.push(restored);
+              }
+            }
+            saved++;
+            stage.push(`[抢救×4] ${bb(f)} "${f.text}"`);
+          }
+          stage.push(`[抢救×4] ${saved}/${rescue.length} 行救回`);
+        } catch (e) {
+          stage.push(`[抢救×4] 失败:${e instanceof Error ? e.message : String(e)}`);
+        }
+      }
       const fullBlocks: OCRBox[][] = rects.map(() => []);
       for (const b of recdAll) {
         const fi = inAny(b);
         if (fi >= 0) fullBlocks[fi].push(b);
       }
-      // det 认领、rec 却没交回文本的行 = 识别器丢的(空/垃圾),与圈无关 —— 单独量出来
-      const recdKeys = new Set(recdAll.map((r) => `${r.raw.x1},${r.raw.y1}`)); // ponytail: 坐标当身份够用,rec 不改 raw
+      // det 找到、rec(含抢救)仍交白卷的行 = 真识别不了,圈内圈外分开量出来
+      const recdKeys = new Set<string>(recdAll.map((r) => `${r.raw.x1},${r.raw.y1}`)); // ponytail: 坐标当身份够用,rec 不改 raw
+      const outKeys2 = new Set<string>(outBoxes.map((r) => `${r.raw.x1},${r.raw.y1}`));
       let missed = 0;
+      let missedOutN = 0;
       fullBlocks.forEach((blk, fi) => {
         for (const b of blk) stage.push(`[写 F${fi}] ${bb(b)} "${b.text || ""}"`);
       });
@@ -253,6 +289,12 @@ export class OcrEngine {
         missed++;
         marks.push({ raw: d.raw, cls: "norec" });
         stage.push(`[未返回] ${bb(d)} rec 空/垃圾文本`);
+      }
+      for (const d of outDet) {
+        if (outKeys2.has(`${d.raw.x1},${d.raw.y1}`)) continue;
+        missedOutN++;
+        marks.push({ raw: d.raw, cls: "norec" });
+        stage.push(`[未返回·补足] ${bb(d)} rec 空/垃圾文本`);
       }
       const frameOrder = frameReadingOrder(rects, img.width, twoColumn);
       stage.push(`[写序] ${twoColumn ? "双栏:横贯带→左栏→右栏" : "圈按 y→x"} 排: ${frameOrder.map((i) => "F" + i).join(" > ")}`);

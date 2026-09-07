@@ -113,13 +113,13 @@ export class ZoteroPageRenderer implements PageRenderer {
     this.pageCount = this.doc.numPages;
   }
 
-  async renderPage(index: number): Promise<PageImage> {
+  async renderPage(index: number, scale = 2.0): Promise<PageImage> {
     if (!this.doc) throw new Error("No PDF loaded — call load() first");
-    dbg("renderPage(" + index + ") start");
+    dbg("renderPage(" + index + "," + scale + ") start");
 
     const page = await this.doc.getPage(index + 1); // pdf.js is 1-based
     dbg("getPage ok");
-    const viewport = page.getViewport({ scale: 2.0 }); // 144 DPI (2×72)
+    const viewport = page.getViewport({ scale }); // 默认 144 DPI (2×72);b59 抢救用 4×
     const w = Math.round(viewport.width);
     const h = Math.round(viewport.height);
     const widthPoints = viewport.viewBox?.[2] ?? page.getViewport({ scale: 1.0 }).width;

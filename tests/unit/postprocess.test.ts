@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { frameClaimingLine, frameReadingOrder, isGarbageText, lowDensityLine, nmsBoxes, orderBoxes, readingOrder, stackedOrder, type BoxLike, type DetBox } from "../../src/ocr/postprocess";
+import { frameClaimingLine, frameReadingOrder, isGarbageText, lowDensityLine, nmsBoxes, orderBoxes, readingOrder, scaleBox, stackedOrder, type BoxLike, type DetBox } from "../../src/ocr/postprocess";
 
 function box(id: string, x1: number, y1: number, x2: number, y2: number, score = 0.9): DetBox {
   return {
@@ -179,6 +179,16 @@ test("frameReadingOrder twoColumn: 横贯带切区,区内先左栏后右栏", ()
     { x1: 398, y1: 546, x2: 1130, y2: 854 }, // 右栏 ABSTRACT(61.5%宽,非墙)
   ];
   assert.deepEqual(frameReadingOrder(real, 1190, true), [0, 1, 2, 3]);
+});
+
+// b59: 抢救通道的坐标缩放。round-trip 整数坐标必须还原。
+test("scaleBox: points/raw 同步缩放,1/ratio 还原", () => {
+  const b = { points: [10, 20, 30, 20, 30, 28, 10, 28], raw: { x1: 10, y1: 20, x2: 30, y2: 28 }, text: "x" };
+  const up = scaleBox(b, 2);
+  assert.deepEqual(up.points, [20, 40, 60, 40, 60, 56, 20, 56]);
+  assert.deepEqual(up.raw, { x1: 20, y1: 40, x2: 60, y2: 56 });
+  const down = scaleBox({ ...up, points: up.points.slice(), raw: { ...up.raw } }, 0.5);
+  assert.deepEqual(down.raw, b.raw);
 });
 
 test("stackedOrder: 圈内跨栏的两堆先读左堆再读右堆,不再逐行交错", () => {

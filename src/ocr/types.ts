@@ -48,8 +48,8 @@ export interface OCRResult {
  */
 export interface PageRenderer {
   pageCount: number;
-  /** Render page `index` (0-based) to RGBA pixels at a reasonable DPI. */
-  renderPage(index: number): Promise<PageImage>;
+  /** Render page `index` (0-based) to RGBA pixels; scale 默认 2(144 DPI),b59 抢救用 4。 */
+  renderPage(index: number, scale?: number): Promise<PageImage>;
   /** Release all resources held by the renderer. */
   dispose(): void;
 }

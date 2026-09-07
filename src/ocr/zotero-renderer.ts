@@ -10,10 +10,11 @@
  * main thread and freeze the whole app.
  */
 import { PageRenderer, PageImage } from "./types";
+import { debugLog } from "../debug-log";
 
 /**
- * 逐句排查日志，默认关闭（extensions.zotero.pdfocrforzotero.debug）。
- * 动态读 pref：改动立即生效，无需重启。错误路径日志不走这里，始终输出。
+ * 逐句排查日志,默认关闭(extensions.zotero.pdfocrforzotero.debug)。
+ * 动态读 pref:改动立即生效,无需重启。错误路径日志不走这里,始终输出。
  */
 function dbg(msg: string): void {
   try {
@@ -21,7 +22,9 @@ function dbg(msg: string): void {
   } catch {
     return;
   }
-  Zotero.debug(`PDF OCR v3 renderer: ${msg}`);
+  const s = `PDF OCR v3 renderer: ${msg}`;
+  debugLog.log(s);
+  Zotero.debug(s);
 }
 
 /** Web/JS globals pdfjs-dist operates with (its legacy build also runs in Node). */
@@ -86,7 +89,7 @@ export class ZoteroPageRenderer implements PageRenderer {
     // (only used if the main-thread WorkerMessageHandler is unavailable).
     pdfjsLib.GlobalWorkerOptions.workerSrc = addonRoot + "content/scripts/pdf.worker.mjs";
     dbg("workerSrc set, typeof IOUtils=" + typeof IOUtils);
-    // 读文件用 IOUtils.read（异步，不阻塞主线程）
+    // 读文件用 IOUtils.read(异步,不阻塞主线程)
     let data: Uint8Array;
     try {
       dbg("IOUtils.read path=" + path);
@@ -94,7 +97,9 @@ export class ZoteroPageRenderer implements PageRenderer {
       dbg("IOUtils.read ok, len=" + data.length);
     } catch (readErr) {
       const msg = readErr instanceof Error ? readErr.message : String(readErr);
-      Zotero.debug("PDF OCR: IOUtils.read FAILED: " + msg);
+      const s = "PDF OCR: IOUtils.read FAILED: " + msg;
+      debugLog.log(s);
+      Zotero.debug(s);
       throw readErr;
     }
     // pdfjs's FontLoader and CanvasFactory need a document to create
@@ -108,13 +113,13 @@ export class ZoteroPageRenderer implements PageRenderer {
     this.pageCount = this.doc.numPages;
   }
 
-  async renderPage(index: number): Promise<PageImage> {
+  async renderPage(index: number, scale = 2.0): Promise<PageImage> {
     if (!this.doc) throw new Error("No PDF loaded — call load() first");
-    dbg("renderPage(" + index + ") start");
+    dbg("renderPage(" + index + "," + scale + ") start");
 
     const page = await this.doc.getPage(index + 1); // pdf.js is 1-based
     dbg("getPage ok");
-    const viewport = page.getViewport({ scale: 2.0 }); // 144 DPI (2×72)
+    const viewport = page.getViewport({ scale }); // 默认 144 DPI (2×72);b59 抢救用 4×
     const w = Math.round(viewport.width);
     const h = Math.round(viewport.height);
     const widthPoints = viewport.viewBox?.[2] ?? page.getViewport({ scale: 1.0 }).width;

@@ -46,7 +46,7 @@ async function loadCharacterDict(): Promise<string[]> {
  * (blank prepended, space appended) so worker-side decoding matches.
  */
 export async function fetchModelAssets(): Promise<OCRModelAssets> {
-  // wasm 二进制打包在 content/scripts/（与主 bundle 同目录）；模型在 content/models/
+  // wasm 二进制打包在 content/scripts/(与主 bundle 同目录);模型在 content/models/
   const wasmResp = await fetch(addonRoot + "content/scripts/ort-wasm-simd-threaded.jsep.wasm");
   if (!wasmResp.ok) throw new Error(`HTTP ${wasmResp.status}: wasm`);
   const wasm = await wasmResp.arrayBuffer();

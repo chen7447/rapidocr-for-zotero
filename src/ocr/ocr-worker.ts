@@ -11,7 +11,7 @@
  *       maxRotDeg: number }
  *     { type: "page", pageIndex: number, width: number, height: number,
  *       rgba: ArrayBuffer }   // rgba is transferred (zero-copy)
- *     { type: "det", id: number, width, height, rgba }          // 只检测框（单页并行第一阶段）
+ *     { type: "det", id: number, width, height, rgba }          // 只检测框(单页并行第一阶段)
  *     { type: "recBatch", id: number, width, height, rgba, boxes } // 对指定框列表并行识别
  *   worker → main:
  *     { type: "ready" }
@@ -85,7 +85,7 @@ self.onmessage = async (ev: MessageEvent) => {
   try {
     if (data.type === "init") {
       ort.env.wasm.numThreads = 1; // 沙箱无 SharedArrayBuffer/Worker 池 → 单线程
-      ort.env.wasm.wasmBinary = data.wasm; // 直接提供 wasm 字节，无需 URL 加载
+      ort.env.wasm.wasmBinary = data.wasm; // 直接提供 wasm 字节,无需 URL 加载
       await Promise.all([
         ort.InferenceSession.create(new Uint8Array(data.det), { executionProviders: ["wasm"] }),
         ort.InferenceSession.create(new Uint8Array(data.rec), { executionProviders: ["wasm"] }),
@@ -150,7 +150,7 @@ async function runPage(msg: WorkerPage): Promise<OCRBox[]> {
   return recBoxes(pixels, msg.width, msg.height, raw);
 }
 
-/** 整页检测 → 返回带几何的框（text 为空），并做 nms 去重。单页并行第一阶段用。 */
+/** 整页检测 → 返回带几何的框(text 为空),并做 nms 去重。单页并行第一阶段用。 */
 async function detOnly(pixels: Uint8ClampedArray, w: number, h: number): Promise<OCRBox[]> {
   const pre = detPreprocess(pixels, w, h, opts.detLimitSideLen);
   const inputName = detSession!.inputNames[0];
@@ -173,7 +173,7 @@ async function detOnly(pixels: Uint8ClampedArray, w: number, h: number): Promise
   return nmsBoxes(detRes.boxes.map((b) => ({ points: b.points.slice(), raw: b.raw, score: b.score, text: "" })));
 }
 
-/** 对给定框列表逐个裁剪+识别（不再 nms——detOnly 已做过）。单页并行第二阶段用。 */
+/** 对给定框列表逐个裁剪+识别(不再 nms——detOnly 已做过)。单页并行第二阶段用。 */
 async function recBoxes(pixels: Uint8ClampedArray, w: number, h: number, rawBoxes: OCRBox[]): Promise<OCRBox[]> {
   const boxes: OCRBox[] = [];
   const recName = recSession!.inputNames[0];

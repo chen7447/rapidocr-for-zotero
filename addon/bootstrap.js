@@ -35,6 +35,7 @@ async function startup({ id, version, rootURI }, _reason) {
   addonContext.Services = Services;
   addonContext.Components = Components;
   addonContext.IOUtils = IOUtils;
+  addonContext.PathUtils = PathUtils;
   addonContext.ChromeUtils = ChromeUtils;
   // The bundled onnxruntime-web glue calls console.* at factory init; the
   // bootstrap sandbox doesn't expose `console` as a bare global.

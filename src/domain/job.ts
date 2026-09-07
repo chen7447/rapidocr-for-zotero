@@ -25,12 +25,16 @@ export type Job = {
   detLimitSideLen?: number;
   detThresh?: number;
   detBoxThresh?: number;
-  /** 长轴与水平夹角超过该角度的框（斜水印）丢弃；undefined = 用偏好值 */
+  /** 长轴与水平夹角超过该角度的框(斜水印)丢弃;undefined = 用偏好值 */
   detMaxRotDeg?: number;
-  /** 0=直立正文 1=倾斜正文 2=复合方法（可覆盖偏好默认） */
+  /** 0=直立正文 1=倾斜正文 2=复合方法(可覆盖偏好默认) */
   cropMode?: number;
-  /** 并行 worker 数（可覆盖偏好默认；undefined = 用偏好值） */
+  /** 并行 worker 数(可覆盖偏好默认;undefined = 用偏好值) */
   ocrWorkers?: number;
+  /** 本次按双栏阅读顺序写文字层(默认关,仅本次) */
+  twoColumn?: boolean;
+  /** 手绘 (Ink) 区域框(PDF 点坐标):按画框顺序分区域输出文字层 */
+  regions?: Array<{ pageIndex: number; x1: number; y1: number; x2: number; y2: number }>;
 };
 
 const VALID_TRANSITIONS: Record<JobStatus, JobStatus[]> = {

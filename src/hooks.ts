@@ -13,6 +13,7 @@ import { Job } from "./domain/job";
 import { registerReaderToolbar, unregisterReaderToolbar, PageOcrRequest, StripRequest } from "./ui/reader-toolbar";
 import { toPageIndexes } from "./ocr/page-spec";
 import { parseOcrPrefs, RawPrefValue } from "./ocr/prefs";
+import { debugLog } from "./debug-log";
 import { t } from "./locale";
 
 const initializedWindows = new WeakSet<Window>();
@@ -23,10 +24,12 @@ let queueDialog: OcrQueueDialog | null = null;
 let activeEngine: { cancel(): void } | null = null;
 let prefsRegistered = false;
 
-// ─── dev log helper — mirrors to Zotero debug pane ─────────────────
+// ─── dev log helper — mirrors to Zotero debug pane + plugin-private buffer ──
 
 function log(msg: string): void {
-  Zotero.debug(`PDF OCR For Zotero v3: ${msg}`);
+  const s = `PDF OCR For Zotero v3: ${msg}`;
+  Zotero.debug(s);
+  debugLog.log(s);
 }
 
 // ─── Zotero helpers ─────────────────────────────────────────────────
@@ -53,9 +56,9 @@ function getFallbackSelection(): SelectionItem[] {
 }
 
 /**
- * 兜底：手动触发 MenuManager 重建「主条目」右键菜单。
+ * 兜底:手动触发 MenuManager 重建「主条目」右键菜单。
  * 缓解 Zotero 已知 bug——注销插件菜单后主条目右键菜单打不开。
- * 加载时执行可修复被其它插件搞坏的菜单；注销后执行是尽力而为的缓解。
+ * 加载时执行可修复被其它插件搞坏的菜单;注销后执行是尽力而为的缓解。
  */
 function rebuildLibraryItemMenu(): void {
   try {
@@ -82,7 +85,7 @@ function createJob(jobIndex: number, item: SelectionItem, path: string, extra: P
 
 function readOcrPrefs(): ReturnType<typeof parseOcrPrefs> {
   const PREFIX = "pdfocrforzotero";
-  // 未注册的键读起来可能抛错；null/undefined 一律交由 parseOcrPrefs 当"未设置"处理
+  // 未注册的键读起来可能抛错;null/undefined 一律交由 parseOcrPrefs 当"未设置"处理
   const get = (key: string): RawPrefValue => {
     try {
       return Zotero.Prefs.get(PREFIX + "." + key) as RawPrefValue;
@@ -132,14 +135,14 @@ function confirmCreateParent(title: string): boolean {
 // ─── Job manager ───
 
 /**
- * 队列进度窗：整个会话共用一个实例、一个窗口，任务以标签页呈现。
- * 关窗后重开时沿用实例（任务历史保留），实例与窗口永不错位。
- * 用户手关窗口 = 全部取消（沿用旧单任务窗语义）。
+ * 队列进度窗:整个会话共用一个实例、一个窗口,任务以标签页呈现。
+ * 关窗后重开时沿用实例(任务历史保留),实例与窗口永不错位。
+ * 用户手关窗口 = 全部取消(沿用旧单任务窗语义)。
  */
 function ensureQueueDialog(): OcrQueueDialog {
   if (!queueDialog) {
     queueDialog = new OcrQueueDialog();
-    // 每张卡片自己的"取消"按钮：按 jobId 精确取消（运行中的等价于取消当前）
+    // 每张卡片自己的"取消"按钮:按 jobId 精确取消(运行中的等价于取消当前)
     queueDialog.setOnCancelTask((jobId) => jobManager?.cancelJob(jobId));
     queueDialog.setOnCancelAll(() => {
       jobManager?.cancelCurrent();
@@ -150,7 +153,7 @@ function ensureQueueDialog(): OcrQueueDialog {
   return queueDialog;
 }
 
-/** 入队即出标签：批量选择时 PDF1..N 立刻出现在进度窗（等待中）。 */
+/** 入队即出标签:批量选择时 PDF1..N 立刻出现在进度窗(等待中)。 */
 function registerQueuedJobTab(job: Job): void {
   try {
     ensureQueueDialog().addTask(job.jobId, job.title);
@@ -165,7 +168,7 @@ function ensureJobManager(): JobManager {
       async execute(job) {
         const dlg = queueDialog;
         // 取消不再轮询对话框窗口——JobManager 的任务状态是唯一事实来源
-        //（cancelCurrent 先置 cancelled 再 kill，引擎每步都能看到）
+        //(cancelCurrent 先置 cancelled 再 kill,引擎每步都能看到)
         const jobCancelled = () => jobManager?.get(job.jobId)?.status === "cancelled";
 
         try {
@@ -206,6 +209,8 @@ function ensureJobManager(): JobManager {
             cropMode,
             workers: ocrWorkers,
             pageIndexes: job.pageIndexes,
+            regions: job.regions,
+            twoColumn: !!job.twoColumn,
             isCancelled: jobCancelled,
             onProgress: (info) => queueDialog?.updateTask(job.jobId, Math.round(info.percent), info.stage, info.message),
           });
@@ -217,18 +222,18 @@ function ensureJobManager(): JobManager {
             activeEngine = null;
             engine.dispose();
           }
-          log(`job ${job.jobId} — OCR done: ${result.pages.length} pages`);
+          log(`job ${job.jobId} — OCR done: ${result.pages.length} pages, build ${addonVersion}`);
 
           dlg?.updateTask(job.jobId, 90, "v3", t("hooks.rebuilding"));
 
           // 3. Build searchable PDF with invisible text layer
           const { addOcrLayerToPdf } = await import("./ocr/pdf-builder");
-          // IOUtils.read 返回的是 Gecko 主 realm 的 Uint8Array；pdf-lib 用
-          // `instanceof Uint8Array`（沙箱 realm）做类型检查会失败（报 "NaN"），
+          // IOUtils.read 返回的是 Gecko 主 realm 的 Uint8Array;pdf-lib 用
+          // `instanceof Uint8Array`(沙箱 realm)做类型检查会失败(报 "NaN"),
           // 必须 `new Uint8Array(...)` 拷贝成沙箱 realm 的 TypedArray。
           const overlayPath = job.writePath || job.path;
           const originalBytes = new Uint8Array(await IOUtils.read(overlayPath));
-          const outputPdf = await addOcrLayerToPdf(originalBytes, result);
+          const outputPdf = await addOcrLayerToPdf(originalBytes, result, undefined, !!job.twoColumn, job.regions);
 
           if (job.inPlace) {
             await writePdf(overlayPath, outputPdf);
@@ -240,76 +245,90 @@ function ensureJobManager(): JobManager {
             return;
           }
 
-          const { createOCRAttachment, createParentAndAttachOCR, deriveOcrOutputPath } = await import("./zotero/attachment-service");
-          const outputPath = deriveOcrOutputPath(job.path);
-          if (outputPath.toLowerCase() === job.path.toLowerCase()) {
-            throw new Error(t("hooks.unsafePath", { path: job.path }));
-          }
-          await IOUtils.write(outputPath, outputPdf);
-
+          const { createOCRAttachment, createParentAndAttachOCR } = await import("./zotero/attachment-service");
+          // 写入临时目录:导入(拷贝)完成后 finally 删除——成功、导入失败、
+          // 用户取消父条目确认,三条路径都不遗留文件(v1.10.0 孤儿文件修复)
+          const tmpDir = Zotero.getTempDirectory().path;
+          const outputPath = PathUtils.join(tmpDir, `pdfocr-${Date.now()}-${job.attachmentID}.pdf`);
           let ocrAttachmentID: number | undefined;
-          const attachResult = await createOCRAttachment({
-            attachmentID: job.attachmentID,
-            path: outputPath,
-            title: job.title,
-            getItems: zoteroItemsByID,
-            importFromFile: async (opts) => {
-              // Zotero 10 已移除 Zotero.Items.addRaw；用官方 Attachments.importFromFile
-              const item = await Zotero.Attachments.importFromFile({
-                file: opts.file,
-                parentItemID: opts.parentItemID,
-                libraryID: opts.libraryID,
-                title: opts.title,
-              });
-              return { id: item.id };
-            },
-            indexItems: (ids, opts) => Zotero.Fulltext.indexItems(ids, opts),
-          });
+          try {
+            await IOUtils.write(outputPath, outputPdf);
 
-          if (attachResult.status === "sibling_imported") {
-            ocrAttachmentID = attachResult.attachmentID;
-          }
+            const attachResult = await createOCRAttachment({
+              attachmentID: job.attachmentID,
+              path: outputPath,
+              title: job.title,
+              getItems: zoteroItemsByID,
+              importFromFile: async (opts) => {
+                // Zotero 10 已移除 Zotero.Items.addRaw;用官方 Attachments.importFromFile
+                const item = await Zotero.Attachments.importFromFile({
+                  file: opts.file,
+                  parentItemID: opts.parentItemID,
+                  libraryID: opts.libraryID,
+                  title: opts.title,
+                });
+                return { id: item.id };
+              },
+              indexItems: (ids, opts) => Zotero.Fulltext.indexItems(ids, opts),
+            });
 
-          if (attachResult.status === "standalone_attachment") {
-            // PDF has no parent — offer to create one
-            const confirmed = confirmCreateParent(job.title);
-            if (confirmed) {
-              const parentResult = await createParentAndAttachOCR({
-                attachmentID: job.attachmentID,
-                path: outputPath,
-                title: job.title,
-                getItems: zoteroItemsByID,
-                createRegularItem: async (opts) => {
-                  // Zotero 10: new Zotero.Item + saveTx() 代替已移除的 Zotero.Items.addRaw
-                  const item = new Zotero.Item("journalArticle");
-                  item.libraryID = opts.libraryID;
-                  item.setField("title", opts.title);
-                  await item.saveTx();
-                  return { id: item.id };
-                },
-                setAttachmentParent: (attachID, parentID) =>
-                  Zotero.Items.setParent(attachID, parentID),
-                importFromFile: async (opts) => {
-                  // Zotero 10: Attachments.importFromFile 代替已移除的 addRaw
-                  const item = await Zotero.Attachments.importFromFile({
-                    file: opts.file,
-                    parentItemID: opts.parentItemID,
-                    libraryID: opts.libraryID,
-                    title: opts.title,
-                  });
-                  return { id: item.id };
-                },
-                indexItems: (ids, opts) => Zotero.Fulltext.indexItems(ids, opts),
-              });
-              if (parentResult.status === "parent_created") {
-                ocrAttachmentID = parentResult.attachmentID;
+            if (attachResult.status === "sibling_imported") {
+              ocrAttachmentID = attachResult.attachmentID;
+            }
+
+            if (attachResult.status === "standalone_attachment") {
+              // PDF has no parent — offer to create one
+              const confirmed = confirmCreateParent(job.title);
+              if (confirmed) {
+                const parentResult = await createParentAndAttachOCR({
+                  attachmentID: job.attachmentID,
+                  path: outputPath,
+                  title: job.title,
+                  getItems: zoteroItemsByID,
+                  createRegularItem: async (opts) => {
+                    // Zotero 10: new Zotero.Item + saveTx() 代替已移除的 Zotero.Items.addRaw
+                    const item = new Zotero.Item("journalArticle");
+                    item.libraryID = opts.libraryID;
+                    item.setField("title", opts.title);
+                    await item.saveTx();
+                    return { id: item.id };
+                  },
+                  setAttachmentParent: async (attachID, parentID) => {
+                    // Zotero 并无 Items.setParent API(10.0.1 源码核实不存在)。
+                    // 官方改父方式:Item 实例 parentItemID setter + saveTx(item.js L148)
+                    const att = zoteroItemsByID([attachID])[0] as unknown as
+                      { parentItemID: number | false; saveTx(): Promise<unknown> } | undefined;
+                    if (!att) throw new Error(`attachment ${attachID} not found`);
+                    att.parentItemID = parentID;
+                    await att.saveTx();
+                  },
+                  importFromFile: async (opts) => {
+                    // Zotero 10: Attachments.importFromFile 代替已移除的 addRaw
+                    const item = await Zotero.Attachments.importFromFile({
+                      file: opts.file,
+                      parentItemID: opts.parentItemID,
+                      libraryID: opts.libraryID,
+                      title: opts.title,
+                    });
+                    return { id: item.id };
+                  },
+                  indexItems: (ids, opts) => Zotero.Fulltext.indexItems(ids, opts),
+                });
+                if (parentResult.status === "parent_created") {
+                  ocrAttachmentID = parentResult.attachmentID;
+                }
               }
+            }
+          } finally {
+            try { await IOUtils.remove(outputPath, { ignoreAbsent: true }); }
+            catch (cleanupErr) {
+              log(`temp cleanup failed: ${cleanupErr instanceof Error ? cleanupErr.message : String(cleanupErr)}`);
             }
           }
 
           dlg?.finishTask(job.jobId, "completed", t("hooks.done", { n: result.pages.reduce((s, p) => s + p.boxes.length, 0) }));
 
-          // 完成后自动打开 [OCR] 附件（偏好开关，默认关闭）
+          // 完成后自动打开 [OCR] 附件(偏好开关,默认关闭)
           if (autoOpen && ocrAttachmentID) {
             try {
               const { openAttachment } = await import("./zotero/open-file");
@@ -334,8 +353,8 @@ function ensureJobManager(): JobManager {
         activeEngine?.cancel();
       },
     });
-    // JobManager 事件 → 队列窗。onJobStarted 负责把标签切到运行态；
-    // 被「全部取消」干掉的排队任务不会进入 execute，只能从这里收尾。
+    // JobManager 事件 → 队列窗。onJobStarted 负责把标签切到运行态;
+    // 被「全部取消」干掉的排队任务不会进入 execute,只能从这里收尾。
     jobManager.addListener({
       onJobStarted: (started) => {
         try { ensureQueueDialog().markRunning(started.jobId, started.title); }
@@ -360,11 +379,11 @@ async function handleSelection(resolution: SelectionResolution): Promise<void> {
     const message = unavailable
       ? t("hooks.unavailable", { n: unavailable })
       : t("hooks.nonePdf");
-    Zotero.debug(`PDF OCR For Zotero: ${message}`);
+    log(message);
     return;
   }
 
-  // 右键 OCR PDF：先弹设置面板（预填偏好，仅本次生效），点「运行」才入队；
+  // 右键 OCR PDF:先弹设置面板(预填偏好,仅本次生效),点「运行」才入队;
   // 「取消」或关闭面板则不执行本次操作。
   const { showOcrSettingsDialog } = await import("./ui/ocr-settings-dialog");
   const p = readOcrPrefs();
@@ -376,6 +395,7 @@ async function handleSelection(resolution: SelectionResolution): Promise<void> {
       detMaxRotDeg: p.detMaxRotDeg,
       cropMode: p.cropMode,
       ocrWorkers: p.ocrWorkers,
+      twoColumn: false,
     },
     count === 1
       ? (resolution.jobs[0].attachment.getDisplayTitle?.() || t("settings.title"))
@@ -388,7 +408,7 @@ async function handleSelection(resolution: SelectionResolution): Promise<void> {
 
   const manager = ensureJobManager();
   // JobManager 对"已在队列/处理中"的附件 enqueue 会 throw——收集跳过数而不是
-  // 让 forEach 中途炸断，静默丢掉剩余任务
+  // 让 forEach 中途炸断,静默丢掉剩余任务
   let skipped = 0;
   resolution.jobs.forEach((job, index) => {
     const queued = createJob(index, job.attachment, job.path, settings);
@@ -423,21 +443,15 @@ async function handlePageOcr(req: PageOcrRequest): Promise<void> {
     detMaxRotDeg: req.detMaxRotDeg,
     cropMode: req.cropMode,
     ocrWorkers: req.ocrWorkers,
+    twoColumn: req.twoColumn,
+    regions: req.regions,
   };
-  let renderItem = item;
-  let renderPath = path;
   if (isDerivedOCRAttachment(item)) {
+    // 就地识别正在看的这一份:像素与圈选标注必须同属一个附件。旧写法把输入跳到原件
+    // (renderItem = source),而框是从这份 [OCR] 附件收的 → 识别结果和你画的圈对不上(b42 实测)。
     extra.inPlace = true;
     extra.writePath = path;
     extra.writeAttachmentID = item.id;
-    const source = findSourceSibling(item);
-    const srcPath = source
-      ? await source.getFilePathAsync?.() || source.getFilePath?.() || false
-      : false;
-    if (source && srcPath) {
-      renderItem = source;
-      renderPath = srcPath;
-    }
   } else {
     const sibling = findOcrSibling(item);
     const sibPath = sibling
@@ -450,7 +464,7 @@ async function handlePageOcr(req: PageOcrRequest): Promise<void> {
     }
   }
   try {
-    const queued = createJob(0, renderItem, renderPath, extra);
+    const queued = createJob(0, item, path, extra);
     ensureJobManager().enqueue(queued);
     registerQueuedJobTab(queued);
   } catch (err) {
@@ -527,7 +541,7 @@ async function handleStripOcr(req: StripRequest): Promise<void> {
   closeReadersFor(req.itemID);
   if (ocrItem.id !== req.itemID) closeReadersFor(ocrItem.id);
 
-  // 队列窗：显式取消进行中/排队的 OCR 任务（沿用旧"关窗即取消"语义），再关窗
+  // 队列窗:显式取消进行中/排队的 OCR 任务(沿用旧"关窗即取消"语义),再关窗
   if (queueDialog) {
     queueDialog.requestCancelAll();
     queueDialog.close();
@@ -597,10 +611,10 @@ async function onStartup(): Promise<void> {
     try {
       contextMenuController.register();
     } catch {
-      // MenuManager 不可用时不崩溃，降级为无右键菜单
+      // MenuManager 不可用时不崩溃,降级为无右键菜单
       contextMenuController = null;
     }
-    // 兜底：加载时强制重建主条目右键菜单（修复被其它插件禁用搞坏的菜单）
+    // 兜底:加载时强制重建主条目右键菜单(修复被其它插件禁用搞坏的菜单)
     rebuildLibraryItemMenu();
   }
   unregisterReaderToolbar();
@@ -616,17 +630,20 @@ async function onStartup(): Promise<void> {
 }
 
 async function onMainWindowLoad(window: Window): Promise<void> {
+  debugLog.registerHelpMenuItem(window.document as unknown as Document);
   if (initializedWindows.has(window)) return;
   window.MozXULElement?.insertFTLIfNeeded("pdfocrforzotero-mainWindow.ftl");
   initializedWindows.add(window);
 }
 
 async function onMainWindowUnload(window: Window): Promise<void> {
+  debugLog.unregisterFromWindow(window.document as unknown as Document);
   if (!initializedWindows.has(window)) return;
   initializedWindows.delete(window);
 }
 
 async function onShutdown(): Promise<void> {
+  debugLog.unregisterAll();
   if (prefsRegistered) {
     unregisterPrefs(getPreferencePanes());
     prefsRegistered = false;
@@ -639,7 +656,7 @@ async function onShutdown(): Promise<void> {
   if (contextMenuController) {
     try { contextMenuController.unregister(); } catch { /* best-effort */ }
     contextMenuController = null;
-    // 兜底：注销后强制重建菜单（实测压不住 shutdown 之后的破坏，尽力而为）
+    // 兜底:注销后强制重建菜单(实测压不住 shutdown 之后的破坏,尽力而为)
     rebuildLibraryItemMenu();
   }
   unregisterReaderToolbar();

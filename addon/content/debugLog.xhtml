@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<?xml-stylesheet href="chrome://global/skin/" type="text/css"?>
+<window xmlns="http://www.mozilla.org/keymaster/gatekeeper/there.is.only.xul"
+        xmlns:html="http://www.w3.org/1999/xhtml"
+        id="pdfocr-debuglog-window"
+        windowtype="chrome:pdfocr-debuglog"
+        title="PDF OCR 调试日志"
+        width="860" height="560"
+        persist="width height screenX screenY">
+  <script src="chrome://zotero/content/include.js"/>
+  <vbox flex="1">
+    <hbox align="center" style="padding:4px;gap:6px">
+      <button id="pdfocr-dbg-copy" label="复制全部"/>
+      <button id="pdfocr-dbg-report" label="复制反馈报告"/>
+      <button id="pdfocr-dbg-clear" label="清空"/>
+      <checkbox id="pdfocr-dbg-auto" label="自动滚动" checked="true"/>
+      <spacer flex="1"/>
+      <label id="pdfocr-dbg-stat" value="" style="opacity:.6"/>
+    </hbox>
+    <!-- 实测:Zotero 10 (Fx128) 里遗留 XUL textbox 不再渲染 .value,用 html:textarea -->
+    <html:textarea id="pdfocr-dbg-ta" readonly="readonly" wrap="off" flex="1"
+                   style="width:100%;height:100%;font-family:monospace;font-size:12px;resize:none"/>
+  </vbox>
+  <script src="chrome://pdfocrforzotero/content/debugLog.js"/>
+</window>

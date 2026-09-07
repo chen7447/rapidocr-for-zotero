@@ -28,3 +28,7 @@
 .env.*
 !.env.example
 *.log
+
+# Zotero debug output dumps (user data, never commit)
+/Debug Output.htm
+/Debug Output_files/

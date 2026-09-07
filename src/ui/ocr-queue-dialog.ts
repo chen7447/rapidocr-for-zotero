@@ -4,7 +4,7 @@
  * ONE window embeds ONE CARD per OCR job (用户要求的大窗套小窗布局):
  * every enqueued PDF gets its own card with an independent progress bar,
  * status, message and dual timers — all cards visible at once, no tabs.
- * A queued card shows 等待中…（等待《运行中文件》完成）. Every ACTIVE card
+ * A queued card shows 等待中…(等待《运行中文件》完成). Every ACTIVE card
  * carries its own 取消 button (bottom-right): it cancels that job — running
  * or queued. 全部取消 clears current + queue; closing the window while tasks
  * are active counts as 全部取消.
@@ -23,6 +23,7 @@
  */
 
 import { formatElapsed } from "./ocr-dialog";
+import { debugLog } from "../debug-log";
 import { t } from "../locale";
 
 function qdbg(msg: string): void {
@@ -31,7 +32,9 @@ function qdbg(msg: string): void {
   } catch {
     return;
   }
-  Zotero.debug(`PDF OCR v3 queue-dialog: ${msg}`);
+  const s = `PDF OCR v3 queue-dialog: ${msg}`;
+  debugLog.log(s);
+  Zotero.debug(s);
 }
 
 type TaskStatus = "queued" | "running" | "completed" | "failed" | "cancelled";
@@ -209,8 +212,8 @@ export class OcrQueueDialog {
     });
 
     if (this.tick !== null) clearInterval(this.tick);
-    // 每秒对账：卡片丢失/挂在旧文档上（环境原因可能发生）就重建，并刷新全部
-    // 状态——窗口状态在 1 秒内自愈，不依赖单次渲染是否成功。
+    // 每秒对账:卡片丢失/挂在旧文档上(环境原因可能发生)就重建,并刷新全部
+    // 状态——窗口状态在 1 秒内自愈,不依赖单次渲染是否成功。
     this.tick = setInterval(() => {
       try { this.reconcile(); } catch (err) { qdbg(`reconcile failed: ${err}`); }
     }, 1000) as unknown as number;
@@ -282,8 +285,8 @@ export class OcrQueueDialog {
       this.tasks.set(id, task);
       this.order.push(id);
     }
-    // 新一批开始时清掉上一批的遗留卡片：没有其他进行中/排队任务，
-    // 而窗口里还挂着已终态的旧卡片 → 全部移除（用户要求不保留旧卡）
+    // 新一批开始时清掉上一批的遗留卡片:没有其他进行中/排队任务,
+    // 而窗口里还挂着已终态的旧卡片 → 全部移除(用户要求不保留旧卡)
     const othersActive = [...this.tasks.values()].some(
       (x) => x !== task && (x.status === "queued" || x.status === "running"),
     );
@@ -352,10 +355,10 @@ export class OcrQueueDialog {
   // ── card rendering (createElement only — innerHTML is a proven no-op here) ──
 
   /**
-   * 每秒对账自愈：
-   * 1) 任务没有卡片、或卡片挂在旧文档/已断连 → 就地重建；
-   * 2) 强制 DOM 卡片顺序 === 模型顺序（模型顺序 = 入队顺序，运行中的在前）——
-   *    补建的卡片总是追加到末尾，若创建时序出过岔子，这里把它搬回正确位置；
+   * 每秒对账自愈:
+   * 1) 任务没有卡片、或卡片挂在旧文档/已断连 → 就地重建;
+   * 2) 强制 DOM 卡片顺序 === 模型顺序(模型顺序 = 入队顺序,运行中的在前)——
+   *    补建的卡片总是追加到末尾,若创建时序出过岔子,这里把它搬回正确位置;
    * 3) 重画全部状态。1 秒内收敛。
    */
   private reconcile(): void {

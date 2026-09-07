@@ -48,6 +48,10 @@ test("isGarbageText catches fraction-bar 8-runs and keeps citations", () => {
   assert.equal(isGarbageText("9(1):101-123"), false);
   assert.equal(isGarbageText("https://doi.org/10.1007"), false);
   assert.equal(isGarbageText("control."), false);
+  // b60 回归:邮箱用户名里合法的 9999 不得枪毙整行;短串塌缩仍判垃圾
+  assert.equal(isGarbageText("E-mailaddresses:zhangtao@jiangnan.edu.cn.zhangtao9999@hotmail.com"), false);
+  assert.equal(isGarbageText("wwww"), true);
+  assert.equal(isGarbageText("##########"), true);
 });
 
 const PAGE = 1200;

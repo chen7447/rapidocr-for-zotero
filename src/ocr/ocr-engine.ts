@@ -248,23 +248,32 @@ export class OcrEngine {
         try {
           const hi = await this.renderer.renderPage(pageIndex, 4);
           const ratio = hi.width / img.width;
-          const fixed = await this.clients[0].recBatch(hi.width, hi.height, hi.data.buffer as ArrayBuffer, rescue.map((b) => scaleBox(b, ratio)));
+          // det 小框常切掉字母上下伸部:裁剪外扩(高±25%/宽±10%,夹页界),rec 自己会剪空白
+          const pad = (b: OCRBox): OCRBox => {
+            const mx = (b.raw.x2 - b.raw.x1) * 0.1, my = (b.raw.y2 - b.raw.y1) * 0.25;
+            const x1 = Math.max(0, Math.round(b.raw.x1 - mx)), y1 = Math.max(0, Math.round(b.raw.y1 - my));
+            const x2 = Math.min(img.width, Math.round(b.raw.x2 + mx)), y2 = Math.min(img.height, Math.round(b.raw.y2 + my));
+            return { ...b, points: [x1, y1, x2, y1, x2, y2, x1, y2], raw: { x1, y1, x2, y2 } };
+          };
+          const padded = rescue.map(pad);
+          const scaled = padded.map((b) => scaleBox(b, ratio));
+          const fixed = await this.clients[0].recBatch(hi.width, hi.height, hi.data.buffer as ArrayBuffer, scaled);
           let saved = 0;
           for (const f of fixed) {
-            const k = `${Math.round(f.raw.x1 / ratio)},${Math.round(f.raw.y1 / ratio)}`;
+            // recBoxes 原样带回 box.raw → 用精确整数坐标回配,不吃浮点舍入
+            const idx = scaled.findIndex((s) => s.raw.x1 === f.raw.x1 && s.raw.y1 === f.raw.y1);
+            if (idx < 0) continue;
+            const orig = rescue[idx];
             if (!(f.text || "").trim()) continue;
-            const s = recdBy.get(k);
+            const s = recdBy.get(`${orig.raw.x1},${orig.raw.y1}`);
             if (s) { s.text = f.text; } // 幸存但文本更差的圈内行:直接换更好的
             else {
-              const orig = rescue.find((b) => `${b.raw.x1},${b.raw.y1}` === k);
-              if (orig) {
-                const restored: OCRBox = { points: orig.points.slice(), raw: orig.raw, score: orig.score, text: f.text };
-                if (missedKept.includes(orig)) recdAll.push(restored); // fullBlocks 随后拾起
-                else outBoxes.push(restored);
-              }
+              const restored: OCRBox = { points: orig.points.slice(), raw: orig.raw, score: orig.score, text: f.text };
+              if (missedKept.includes(orig)) recdAll.push(restored); // fullBlocks 随后拾起
+              else outBoxes.push(restored);
             }
             saved++;
-            stage.push(`[抢救×4] ${bb(f)} "${f.text}"`);
+            stage.push(`[抢救×4] ${bb(orig)} "${f.text}"`);
           }
           stage.push(`[抢救×4] ${saved}/${rescue.length} 行救回`);
         } catch (e) {

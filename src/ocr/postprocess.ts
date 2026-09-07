@@ -682,10 +682,12 @@ export function orderBoxes<T extends BoxLike>(boxes: T[], pageWidth?: number, tw
 export function isGarbageText(text: string): boolean {
   const t = text.trim();
   if (!t) return true;
+  // b60: 同字符连跑只有"主导短串"才算 CTC 塌缩伪影。旧规则 run>=4 无差别枪毙,
+  // 把长串里合法的 9999(zhangtao9999@hotmail.com)也杀了——识别再准也进不了文字层。
   let run = 1;
   for (let i = 1; i < t.length; i++) {
     run = t[i] === t[i - 1] ? run + 1 : 1;
-    if (run >= 4) return true;
+    if (run >= 4 && run * 3 >= t.length) return true;
   }
   const counts = new Map<string, number>();
   for (const ch of t) {

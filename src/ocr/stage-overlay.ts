@@ -1,9 +1,66 @@
 /**
  * 测试期可视化（b37+）：把区域 OCR 的分阶段结果画到页面渲染图上，弹窗显示，
- * 用来回答「每个过程分别框住了哪些行、谁被哪条规则丢掉」。调试完成后按要求整体删除：
- * 删掉本文件 + ocr-engine.ts 里 marks 收集与 showStageOverlay 调用即可，识别链路不依赖它。
+ * 用来回答「每个过程分别框住了哪些行、谁被哪条规则丢掉」。
+ * 开关:帮助菜单「OCR 过程图」checkbox(b61 起),勾上后每次区域 OCR 弹诊断图;
+ * 之前每次发版要注释/取消注释代码,现在运行期开关,识别链路不依赖它。
  */
 import { debugLog } from "../debug-log";
+import { t } from "../locale";
+
+const PREF_KEY = "extensions.zotero.pdfocrforzotero.stageOverlay";
+const MENU_ID = "pdfocrforzotero-stage-overlay-menu";
+
+/** 开关读取:pref 不存在时 false(默认关)。 */
+export function stageOverlayEnabled(): boolean {
+  try {
+    return !!(Zotero as unknown as { Prefs?: { get(k: string): unknown } }).Prefs?.get(PREF_KEY);
+  } catch {
+    return false;
+  }
+}
+
+/** 帮助菜单 checkbox 注册(幂等,照 debugLog.registerHelpMenuItem 模式)。
+ *  双入口:onStartup 遍历主窗口 + onMainWindowLoad,各调一次,按 MENU_ID 查重。 */
+export function registerStageOverlayMenu(doc: Document): void {
+  try {
+    if (doc.getElementById(MENU_ID)) return;
+    const popup = doc.getElementById("menu_HelpPopup") || doc.getElementById("helpMenu");
+    if (!popup) return;
+    const anyDoc = doc as unknown as { createXULElement?: (tag: string) => HTMLElement };
+    const item = anyDoc.createXULElement
+      ? anyDoc.createXULElement("menuitem")
+      : (doc as unknown as Document).createElement("menuitem");
+    item.id = MENU_ID;
+    item.setAttribute("type", "checkbox");
+    item.setAttribute("label", t("stageOverlay.menu"));
+    if (stageOverlayEnabled()) item.setAttribute("checked", "true");
+    item.addEventListener("command", () => {
+      const on = !stageOverlayEnabled();
+      try {
+        (Zotero as unknown as { Prefs?: { set(k: string, v: unknown): void } }).Prefs?.set(PREF_KEY, on);
+        item.setAttribute("checked", on ? "true" : "false");
+        debugLog.log(`stage overlay ${on ? "enabled" : "disabled"}`);
+      } catch {
+        /* pref 写失败:状态不动 */
+      }
+    });
+    // 紧挨调试日志菜单,同属插件诊断区
+    const anchor = doc.getElementById("pdfocrforzotero-debug-log-menu") ||
+      ["debug-output-menu", "menuitem-restart-in-troubleshooting-mode", "checkForUpdates"].map((id) => doc.getElementById(id)).find(Boolean);
+    if (anchor) popup.insertBefore(item, anchor);
+    else popup.appendChild(item);
+  } catch {
+    /* 主窗口结构变化时静默降级:菜单丢了不影响 OCR */
+  }
+}
+
+export function unregisterStageOverlayMenu(doc: Document): void {
+  try {
+    doc.getElementById(MENU_ID)?.remove();
+  } catch {
+    /* best-effort */
+  }
+}
 
 type Rect = { x1: number; y1: number; x2: number; y2: number };
 export type StageCls = "in" | "out" | "norec";

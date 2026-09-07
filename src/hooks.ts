@@ -14,6 +14,7 @@ import { registerReaderToolbar, unregisterReaderToolbar, retrofitOpenReaders, Pa
 import { toPageIndexes } from "./ocr/page-spec";
 import { parseOcrPrefs, RawPrefValue } from "./ocr/prefs";
 import { debugLog } from "./debug-log";
+import { registerStageOverlayMenu, unregisterStageOverlayMenu } from "./ocr/stage-overlay";
 import { t } from "./locale";
 
 const initializedWindows = new WeakSet<Window>();
@@ -634,11 +635,16 @@ async function onStartup(): Promise<void> {
   // 末尾再补挂一次:异步初始化期间恢复的 reader 若走了事件路径但容器
   // 未就绪,这里幂等补上(已有按钮则跳过)。
   retrofitOpenReaders();
+  // 帮助菜单双入口之二:onStartup 遍历已开主窗口(覆盖启动后才安装的场景)
+  for (const win of ((Zotero as unknown as { getMainWindows?: () => Window[] }).getMainWindows?.() ?? [])) {
+    try { registerStageOverlayMenu(win.document as unknown as Document); } catch { /* best-effort */ }
+  }
   log("startup complete");
 }
 
 async function onMainWindowLoad(window: Window): Promise<void> {
   debugLog.registerHelpMenuItem(window.document as unknown as Document);
+  registerStageOverlayMenu(window.document as unknown as Document);
   if (initializedWindows.has(window)) return;
   window.MozXULElement?.insertFTLIfNeeded("pdfocrforzotero-mainWindow.ftl");
   initializedWindows.add(window);
@@ -646,12 +652,16 @@ async function onMainWindowLoad(window: Window): Promise<void> {
 
 async function onMainWindowUnload(window: Window): Promise<void> {
   debugLog.unregisterFromWindow(window.document as unknown as Document);
+  unregisterStageOverlayMenu(window.document as unknown as Document);
   if (!initializedWindows.has(window)) return;
   initializedWindows.delete(window);
 }
 
 async function onShutdown(): Promise<void> {
   debugLog.unregisterAll();
+  for (const win of ((Zotero as unknown as { getMainWindows?: () => Window[] }).getMainWindows?.() ?? [])) {
+    try { unregisterStageOverlayMenu(win.document as unknown as Document); } catch { /* best-effort */ }
+  }
   if (prefsRegistered) {
     unregisterPrefs(getPreferencePanes());
     prefsRegistered = false;

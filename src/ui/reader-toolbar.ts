@@ -76,14 +76,20 @@ const AREA_ICON_SVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 2
   <path d="M6 17H3L3 14L1.75 14V18.25H6V17Z" fill="currentColor"/>
 </svg>`;
 
-/** 搜索/识别图标(放大镜,通用 16px 线条风格,currentColor)。 */
-const SEARCH_ICON_SVG = `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16">
-  <path fill="currentColor" fill-rule="evenodd" d="M11.5 8a3.5 3.5 0 1 0-2.12 6.28l-1.55 1.55a.75.75 0 1 0 1.06 1.06l1.55-1.55A3.5 3.5 0 0 0 11.5 8zM9.5 11.5a2 2 0 1 1 4 0 2 2 0 0 1-4 0z"/>
+/** OCR 主按钮「扫描文本」图标:四角扫描框 + 文字行,语义即 OCR。 */
+const SCAN_ICON_SVG = `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+  <path d="M3 6V4.5A1.5 1.5 0 0 1 4.5 3H6"/>
+  <path d="M10 3h1.5A1.5 1.5 0 0 1 13 4.5V6"/>
+  <path d="M13 10v1.5a1.5 1.5 0 0 1-1.5 1.5H10"/>
+  <path d="M6 13H4.5A1.5 1.5 0 0 1 3 11.5V10"/>
+  <path d="M6 6.5h4"/>
+  <path d="M6 9.5h4"/>
 </svg>`;
 
-/** 橡皮擦图标(通用 16px 线条风格,currentColor)。 */
-const ERASER_ICON_SVG = `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16">
-  <path fill="currentColor" fill-rule="evenodd" d="M10.9 1.6 14.4 5.1a1.2 1.2 0 0 1 0 1.7l-6.5 6.5a1.2 1.2 0 0 1-1.7 0L2 9.1a1.2 1.2 0 0 1 0-1.7L8.6 .9a1.2 1.2 0 0 1 1.7 0l.6.7zM5 4.6 2.7 6.9a.4.4 0 0 0 0 .6L5 9.8l3.2-3.2L5 4.6zm4.2.1L6 7.9 8.1 10l3.2-3.2L9.2 4.7zM6.6 11.9l1.2 1.2H13a.6.6 0 0 0 .6-.6v-.6H6.6z"/>
+/** 橡皮擦图标(Lucide eraser 24→16 等比缩放,「擦除」语义)。 */
+const ERASER_ICON_SVG = `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+  <path d="m4.67 14-2.87-2.87c-.67-.67-.67-1.67 0-2.27l6.4-6.4c1.33-1.33 3.33-1.33 4.67 0l2.27 2.27c1.33 1.33 1.33 3.33 0 4.67l-4.4 4.4c-.33.33-.8.53-1.33.53H4.67Z"/>
+  <path d="m3.33 7.33 6 6"/>
 </svg>`;
 
 let onSubmit: ((req: PageOcrRequest) => void) | null = null;
@@ -311,7 +317,7 @@ function togglePop(doc: Document, reader: ReaderLike, btn: HTMLElement): void {
 #${POP_ID} #pdfocr-go{width:100%;padding:7px 0;border:0;border-radius:6px;background:var(--pdfocr-pop-accent);color:var(--pdfocr-pop-onaccent);font-weight:600;cursor:pointer;text-align:center}
 #${POP_ID} #pdfocr-strip,#${POP_ID} #pdfocr-draw{width:100%;padding:5px 8px;border:1px solid var(--pdfocr-pop-border);border-radius:6px;background:var(--pdfocr-pop-sec);color:var(--pdfocr-pop-text);cursor:pointer;font:inherit;text-align:center}
 #${POP_ID} #pdfocr-strip{margin-top:6px}
-#${POP_ID} #pdfocr-draw{margin:0 0 10px;padding:4px 8px;text-align:left}
+#${POP_ID} #pdfocr-draw{margin:0 0 10px;padding:4px 8px;text-align:center}
 #${POP_ID} #pdfocr-draw[hidden]{display:none}
 #${POP_ID} #pdfocr-err{color:var(--pdfocr-pop-err);margin-top:6px;min-height:0;word-break:break-all}
 #${POP_ID} .pdfocr-row{display:flex;flex-wrap:wrap;align-items:center;gap:2px 6px;margin-bottom:10px;cursor:pointer}
@@ -378,7 +384,7 @@ function togglePop(doc: Document, reader: ReaderLike, btn: HTMLElement): void {
       <span style="display:inline-block;vertical-align:-3px;width:14px;height:14px;margin-right:6px;background:16% center/14px no-repeat url('data:image/svg+xml;utf8,${encodeURIComponent(AREA_ICON_SVG)}')"></span>${t("toolbar.drawAreas")}
     </button>
     <button id="pdfocr-go" type="button" title="${t("toolbar.pageOcr")}">
-      <span class="pdfocr-goi" style="display:inline-block;vertical-align:-3px;width:14px;height:14px;margin-right:5px;background:16% center/14px no-repeat url('data:image/svg+xml;utf8,${encodeURIComponent(SEARCH_ICON_SVG)}')"></span>${t("toolbar.go")}
+      <span class="pdfocr-goi" style="display:inline-block;vertical-align:-3px;width:14px;height:14px;margin-right:5px;background:16% center/14px no-repeat url('data:image/svg+xml;utf8,${encodeURIComponent(SCAN_ICON_SVG)}')"></span>${t("toolbar.go")}
     </button>
     <button id="pdfocr-strip" type="button" title="${t("toolbar.stripTip")}">
       <span class="pdfocr-goi" style="display:inline-block;vertical-align:-3px;width:14px;height:14px;margin-right:5px;background:16% center/14px no-repeat url('data:image/svg+xml;utf8,${encodeURIComponent(ERASER_ICON_SVG)}')"></span>${t("toolbar.strip")}
